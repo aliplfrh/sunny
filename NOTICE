@@ -1,0 +1,18 @@
+# NOTICE
+
+Sunny derived from [Vicinae](https://github.com/vicinaehq/vicinae)
+Copyright (C) 2024–2026 Vicinae contributors
+Licensed under the GNU General Public License v3.0 (GPL-3.0).
+
+Sunny is a full port (translation) of Vicinae from C++23/Qt to Rust,
+with a Tauri v2 (WebView2) front-end replacing the Qt/QML layer.
+Sunny is therefore licensed under GPL-3.0 as a derivative work.
+
+Vicinae upstream includes contributions from its sponsors and community.
+This project is not affiliated with, nor endorsed by,
+Raycast Technologies Inc. or the Vicinae project.
+
+Out-of-the-box features of the upstream project Sunny ports from:
+app search, clipboard history, text expander (snippets), file search,
+emoji picker, calculator, window switcher, and extension support
+compatible with the Raycast extension ecosystem.

@@ -1,0 +1,14 @@
+# Rust
+target/
+
+# Tauri / Node
+node_modules/
+dist/
+apps/sunny/src-gen/
+
+# Referensi upstream (read-only, tidak di-track)
+reference/
+
+# Local
+.env
+*.local
