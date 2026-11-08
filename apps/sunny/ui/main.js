@@ -6,7 +6,11 @@ const queryEl = document.getElementById("query");
 const listEl = document.getElementById("list");
 
 let mode = "apps"; // "apps" | "emoji" | "clip"
-const ALL_EMOJI = await invoke("emoji_all"); // dataset penuh, disaring di sini
+let ALL_EMOJI = []; // diisi async saat startup
+invoke("emoji_all").then((data) => {
+  ALL_EMOJI = data;
+  refresh();
+});
 let items = [];
 let selected = 0;
 
