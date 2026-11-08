@@ -29,6 +29,9 @@
   },
   "bundle": {
     "active": false,
-    "targets": "none"
+    "targets": [],
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }

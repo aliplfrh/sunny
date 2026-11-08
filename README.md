@@ -19,6 +19,21 @@
 
 **Windows** diprioritaskan lebih dulu, disusul Linux dan macOS.
 
+## Build (Windows)
+
+**Prasyarat:**
+1. [Rust](https://rustup.rs) (toolchain `stable-x86_64-pc-windows-msvc`)
+2. [Node.js](https://nodejs.org) ≥ 20
+3. **Microsoft Visual Studio Build Tools** dengan workload *Desktop development with C++* (linker MSVC + Windows SDK). Untuk mesin tanpa VS: `winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+4. Jalankan `cargo` dari terminal biasa — karena `link.exe` milik Git for Windows bisa muncul di PATH, repo ini memakai `.cargo/config.toml` yang menunjuk linker MSVC secara eksplisit.
+
+**Perintah:**
+
+```sh
+cargo build --release                    # dari repo root
+target\release\sunny.exe                 # jalankan (Alt+Space untuk tampilkan/sembunyikan)
+```
+
 ## Lisensi
 
 GPL-3.0 — lihat [LICENSE](LICENSE) dan [NOTICE](NOTICE).

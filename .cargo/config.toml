@@ -1,0 +1,10 @@
+# Sunny build config (Windows)
+# `link.exe` milik Git for Windows (usr/bin/link) bisa meltenggalapini di PATH
+# sehingga rustc salah memilih linker. Karena itu linker MSVC ditunjuk eksplisit.
+# Jika versi MSVC berubah (folder 14.x.x), perbarui path di bawah.
+
+[target.x86_64-pc-windows-msvc]
+linker = "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+
+[build]
+jobs = 8
