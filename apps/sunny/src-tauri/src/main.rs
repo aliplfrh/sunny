@@ -11,11 +11,18 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.set_focus();
-            // Memberi tampilan agar langsung meletakkan kursor di search bar
-            let _ = app.emit("sunny:shown", ());
+            show_or_focus_main_window(app);
         }
+    }
+}
+
+/// Tampilkan + fokus (dipakai toggle & menu tray).
+fn show_or_focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        // Memberi tampilan agar langsung meletakkan kursor di search bar
+        let _ = app.emit("sunny:shown", ());
     }
 }
 
@@ -48,6 +55,23 @@ fn run_app(path: String) -> Result<(), String> {
 fn hide_main_window(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
+    }
+}
+
+/// Hasil kalkulator (None bila kueri bukan ekspresi valid).
+#[tauri::command]
+fn calc(query: String) -> Option<String> {
+    sun_core::calc::evaluate(&query)
+}
+
+/// Salin teks ke clipboard (fallback bila JS clipboard API gagal).
+#[tauri::command]
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    match arboard::Clipboard::new() {
+        Ok(mut cb) => cb
+            .set_text(&text)
+            .map_err(|e| format!("clipboard gagal: {e}")),
+        Err(e) => Err(format!("clipboard tidak tersedia: {e}")),
     }
 }
 
@@ -89,10 +113,48 @@ fn main() {
             list_apps,
             search_apps,
             run_app,
-            hide_main_window
+            hide_main_window,
+            calc,
+            copy_to_clipboard
         ])
         .setup(|app| {
+            use tauri::menu::MenuBuilder;
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
             app.global_shortcut().register("Alt+Space")?;
+
+            // ── Tray icon: klik kiri toggle, klik kanan menu ──
+            if let Some(icon) = app.default_window_icon().cloned() {
+                let menu = MenuBuilder::new(app)
+                    .text("show", "Tampilkan Sunny")
+                    .text("quit", "Keluar")
+                    .build()?;
+
+                let _tray = TrayIconBuilder::with_id("main-tray")
+                    .icon(icon)
+                    .tooltip("Sunny")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "show" => show_or_focus_main_window(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if matches!(
+                            event,
+                            TrayIconEvent::Click {
+                                button: MouseButton::Left,
+                                button_state: MouseButtonState::Up,
+                                ..
+                            }
+                        ) {
+                            toggle_main_window(tray.app_handle());
+                        }
+                    })
+                    .build(app)
+                    .ok();
+            }
 
             // Bug 2 yang juga dilaporkan: launcher harus bisa tutup tanpa
             // harus fokus dulu — klik di luar = sembunyikan (perilaku Raycast).

@@ -5,4 +5,5 @@
 //! - `services/app*` → [crate::apps] (indeks aplikasi)
 
 pub mod apps;
+pub mod calc;
 pub mod search;

@@ -5,11 +5,29 @@ const { listen } = window.__TAURI__.event;
 const queryEl = document.getElementById("query");
 const listEl = document.getElementById("list");
 
-let items = []; // hasil pencarian saat ini
+let items = []; // item gabungan: {kind:"calc"|"app", ...}
 let selected = 0;
 
 function hideWindow() {
   invoke("hide_main_window");
+}
+
+function iconElFor(item) {
+  const icon = document.createElement("div");
+  icon.className = "icon";
+  if (item.kind === "calc") {
+    icon.classList.add("calc");
+    icon.textContent = "=";
+  } else if (item.icon) {
+    const img = document.createElement("img");
+    img.src = item.icon;
+    img.alt = "";
+    img.draggable = false;
+    icon.appendChild(img);
+  } else {
+    icon.textContent = "🚀"; // fallback bila ekstraksi ikon gagal
+  }
+  return icon;
 }
 
 function render() {
@@ -19,37 +37,32 @@ function render() {
     div.className = "empty";
     div.textContent = queryEl.value
       ? "Tidak ada yang cocok."
-      : "Sunny siap. Ketik untuk mencari aplikasi.";
+      : "Sunny siap. Ketik aplikasi atau rumus (mis. 12*7)";
     listEl.appendChild(div);
     return;
   }
-  items.forEach((hit, i) => {
+
+  items.forEach((item, i) => {
     const row = document.createElement("div");
     row.className = "item" + (i === selected ? " selected" : "");
     row.setAttribute("role", "option");
 
-    const icon = document.createElement("div");
-    icon.className = "icon";
-    if (hit.item.icon) {
-      const img = document.createElement("img");
-      img.src = hit.item.icon;
-      img.alt = "";
-      img.draggable = false;
-      icon.appendChild(img);
-    } else {
-      icon.textContent = "🚀"; // fallback bila ekstraksi ikon gagal
-    }
+    row.append(iconElFor(item));
 
     const name = document.createElement("div");
     name.className = "name";
-    name.textContent = hit.item.name;
+    if (item.kind === "calc") {
+      name.innerHTML = `${escapeHtml(item.expr)} <b class="val">= ${escapeHtml(item.value)}</b>`;
+    } else {
+      name.textContent = item.name;
+    }
 
     const sub = document.createElement("div");
     sub.className = "sub";
-    sub.textContent = "Start Menu";
+    sub.textContent = item.kind === "calc" ? "Enter: salin" : "Start Menu";
 
-    row.append(icon, name, sub);
-    row.onclick = () => launch(hit);
+    row.append(name, sub);
+    row.onclick = () => activate(i);
     row.onmousemove = () => {
       if (selected !== i) {
         selected = i;
@@ -62,32 +75,57 @@ function render() {
   });
 }
 
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+
 async function refresh() {
   const q = queryEl.value.trim();
+  items = [];
+
+  // Kalkulator: hasil ekspresi = item pertama (index 0)
+  if (q) {
+    const value = await invoke("calc", { query: q });
+    if (value != null) {
+      items.push({ kind: "calc", expr: q, value });
+    }
+  }
+
   if (!q) {
     const apps = await invoke("list_apps");
-    items = apps.map((item) => ({ item, score: 0 }));
+    items.push(...apps.map((item) => ({ kind: "app", item })));
   } else {
-    items = await invoke("search_apps", { query: q });
+    const hits = await invoke("search_apps", { query: q });
+    items.push(...hits.map((hit) => ({ kind: "app", item: hit.item })));
   }
+
   selected = 0;
   render();
 }
 
-function launch(hit) {
-  invoke("run_app", { path: hit.item.path });
-  hideWindow();
+async function activate(i) {
+  const item = items[i];
+  if (!item) return;
+  if (item.kind === "calc") {
+    const ok = navigator.clipboard
+      ?.writeText(item.value)
+      .catch(() => invoke("copy_to_clipboard", { text: item.value }));
+    await ok;
+    hideWindow();
+  } else {
+    invoke("run_app", { path: item.item.path });
+    hideWindow();
+  }
 }
 
-// ── Fokus otomatis (bug 1: ga bisa langsung mengetik) ───────────
-// Dipicu setiap kali launcher muncul lewat Alt+Space dari backend.
+// ── Fokus otomatis ─────────────────────────────
 listen("sunny:shown", () => queryEl.focus());
-// Bila webview mendapat fokus dengan cara lain.
 window.addEventListener("focus", () => queryEl.focus());
-// Sekali di awal (window visible pertama kali).
 queryEl.focus();
 
-// ── Ikon siap di background → segarkan daftar ───────────────────
+// ── Ikon siap di background → segarkan daftar ──
 listen("sunny:apps-updated", () => refresh());
 
 // ── Input & keyboard ───────────────────────────
@@ -107,10 +145,14 @@ window.addEventListener("keydown", (e) => {
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter") {
     e.preventDefault();
-    if (items[selected]) launch(items[selected]);
+    if (items[selected]?.kind === "calc" && selected === 0) {
+      activate(selected);
+    } else if (items[selected]) {
+      activate(selected);
+    }
   } else if (e.key === "Escape") {
     e.preventDefault();
-    hideWindow(); // bug 2: Esc kini menutup launcher
+    hideWindow();
   }
 });
 

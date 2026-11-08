@@ -96,12 +96,22 @@ body {
   image-rendering: -webkit-optimize-contrast;
 }
 
+.item .icon.calc {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+
 .item .name {
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 500;
+}
+.item .name .val {
+  color: var(--accent);
+  font-weight: 600;
 }
 .item .sub {
   color: var(--text-dim);

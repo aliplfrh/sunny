@@ -9,3 +9,4 @@ description = "Core Sunny: mesin pencarian, indeks aplikasi, utilities (port kon
 serde.workspace = true
 base64 = "0.23"
 fuzzy-matcher = "0.3"
+meval = "0.2"
