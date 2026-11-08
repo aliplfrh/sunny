@@ -28,12 +28,13 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg);
+  /* Solid hampir-opak — WebView2 tidak merender backdrop-filter dengan
+     benar pada window transparan (bug: elemen jadi penuh transparan). */
+  background: rgba(20, 20, 24, 0.97);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(24px);
 }
 
 /* ── Search bar ─────────────────────────────── */
