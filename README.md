@@ -1,18 +1,28 @@
 # Sunny
 
-*Sunny* is a fast, lightweight desktop launcher / command palette inspired by [Raycast](https://www.raycast.com/), and a full port of [Vicinae](https://github.com/vicinaehq/vicinae) (C++/Qt) to **Rust**.
+*Sunny* is a fast, lightweight desktop launcher / command palette inspired by [Raycast](https://www.raycast.com/), and a full port of [Vicinae](https://github.com/vicinaehq/vicinae) (C++/Qt) to **Rust**. Press `Alt+Space` anywhere to summon it.
 
 ## Project Status
 
-🚧 **Phase 0 — Foundation** is in progress. See [docs/ROADMAP.md](docs/ROADMAP.md).
+🚧 **Phase 2 — Core Vicinae features** is in progress. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+| Feature | State |
+|---|---|
+| App launcher with fuzzy search + real icons | ✅ |
+| Calculator (`12*7` → Enter copies) | ✅ |
+| Emoji picker (`:` prefix, 1,870 emoji) | ✅ |
+| Clipboard history (master–detail, metadata, pause, paste to active window) | ✅ |
+| System tray icon | ✅ |
+| File search, window switcher | ⏭️ planned |
+| Extension runtime (Vicinae `.figura`) | ⏭️ Phase 3 |
 
 ## Architecture
 
 | Component | Description |
 |---|---|
-| `apps/sunny` | Tauri v2 application — web UI (Raycast-like interface) + Rust backend |
-| `crates/sun-core` | Search engine (fuzzy), ranking, settings, storage |
-| `crates/sun-platform` | Windows platform abstraction: global hotkey, window enumeration, clipboard |
+| `apps/sunny` | Tauri v2 application — web UI (Raycast-like interface) + Rust backend, global hotkey, tray |
+| `crates/sun-core` | Search engine (fuzzy), ranking, calculator, application index, emoji, clipboard store |
+| `crates/sun-platform` | Windows platform abstraction: global hotkey, window helpers, clipboard sequence, icon extraction, paste injection |
 | `crates/sun-extensions` | (Future phase) Extension runtime, Raycast API compatibility |
 
 ## Platform
@@ -32,6 +42,13 @@
 ```sh
 cargo build --release                    # from the repo root
 target\release\sunny.exe                 # run (Alt+Space to show/hide)
+```
+
+**Regenerating assets:**
+
+```sh
+powershell -File scripts/make-icon.ps1    # icons/icon.ico + icon.png from the logo pack
+powershell -File scripts/make-emojis.ps1  # emojis.json from the gemoji dataset (MIT)
 ```
 
 ## License

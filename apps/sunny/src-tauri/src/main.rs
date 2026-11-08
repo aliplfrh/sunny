@@ -200,7 +200,12 @@ fn main() {
             app.global_shortcut().register("Alt+Space")?;
 
             // ── Tray icon: klik kiri toggle, klik kanan menu ──
-            if let Some(icon) = app.default_window_icon().cloned() {
+            // Ikon brand Sunny (dari logo pack) — dibaca langsung dari bytes
+            // agar tray selalu memakai ikon resmi, bukan fallback bawaan.
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                .ok()
+                .or_else(|| app.default_window_icon().cloned());
+            if let Some(icon) = tray_icon {
                 let menu = MenuBuilder::new(app)
                     .text("show", "Tampilkan Sunny")
                     .text("quit", "Keluar")

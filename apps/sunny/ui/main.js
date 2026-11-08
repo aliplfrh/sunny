@@ -27,9 +27,17 @@ let paused = false; // watcher pause?
 let clipType = "all"; // filter dropdown: "all" | "text"
 let clipTotal = 0; // jumlah entri sebelum difilter (untuk "74 items")
 
+// Perintah internal — hanya muncul saat dicari (bukan di daftar default).
+const COMMANDS = [
+  { kind: "cmd", cmd: "clip", icon: "📋", name: "Clipboard History",
+    keys: "clipboard history riwayat clipboard papan klip" },
+  { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker",
+    keys: "emoji picker emotikon" },
+];
+
 const MODE_LABEL = {
-  apps: "Cari aplikasi…",
-  emoji: "Cari emoji…",
+  apps: "Search apps…",
+  emoji: "Search emoji…",
   clip: "Browse clipboard history…",
 };
 queryEl.placeholder = MODE_LABEL[mode];
@@ -167,22 +175,22 @@ function renderDetail(c) {
 function renderFooter() {
   if (mode === "clip") {
     hintsEl.innerHTML = `
-      <span class="hint-strong">📋 Clipboard History</span>
+      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Clipboard History</span>
       <span class="spacer"></span>
       <span><kbd>↵</kbd> Paste to active window</span>
       <span><kbd>Ctrl</kbd><kbd>B</kbd> Actions</span>
       <span><kbd>Ctrl</kbd><kbd>D</kbd> Delete</span>`;
   } else if (mode === "emoji") {
     hintsEl.innerHTML = `
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigasi</span>
-      <span><kbd>↵</kbd> salin</span>
-      <span><kbd>⌫</kbd> kembali</span>`;
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> copy</span>
+      <span><kbd>⌫</kbd> back</span>`;
   } else {
     hintsEl.innerHTML = `
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigasi</span>
-      <span><kbd>↵</kbd> pilih</span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> select</span>
       <span><kbd>:</kbd> emoji</span>
-      <span><kbd>Alt</kbd>+<kbd>Space</kbd> sembunyikan</span>`;
+      <span><kbd>Alt</kbd>+<kbd>Space</kbd> hide</span>`;
   }
 }
 
@@ -203,10 +211,10 @@ function render() {
     const div = document.createElement("div");
     div.className = "empty";
     div.textContent =
-      isClip ? (clipTotal ? "Tidak cocok dengan filter." : "Riwayat clipboard masih kosong.")
-      : mode === "emoji" ? "Tidak ada emoji yang cocok."
-      : queryEl.value ? "Tidak ada yang cocok."
-      : "Sunny siap. Ketik aplikasi, rumus (12*7), ':' untuk emoji, atau pilih perintah di bawah.";
+      isClip ? (clipTotal ? "Nothing matches the filter." : "Clipboard history is empty.")
+      : mode === "emoji" ? "No matching emoji."
+      : queryEl.value ? "Nothing matches."
+      : "Sunny is ready. Type an app name, an expression (12*7), ':' for emoji, or search a command.";
     listEl.appendChild(div);
   }
 
@@ -242,9 +250,9 @@ function render() {
     } else {
       const sub = document.createElement("div");
       sub.className = "sub";
-      if (item.kind === "calc") sub.textContent = "Enter: salin";
-      else if (item.kind === "emoji") sub.textContent = "Enter: salin";
-      else if (item.kind === "cmd") sub.textContent = "Enter: buka";
+      if (item.kind === "calc") sub.textContent = "Enter: copy";
+      else if (item.kind === "emoji") sub.textContent = "Enter: copy";
+      else if (item.kind === "cmd") sub.textContent = "Enter: open";
       else sub.textContent = "Start Menu";
       row.appendChild(sub);
     }
@@ -334,15 +342,16 @@ async function refresh() {
       if (value != null) items.push({ kind: "calc", expr: q, value });
     }
     if (!q) {
-      items.push(
-        { kind: "cmd", cmd: "clip", icon: "📋", name: "Riwayat Clipboard" },
-        { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker (atau ketik ':')" }
-      );
+      // Daftar default hanya aplikasi — perintah internal tidak lagi "menempel"
+      // di atas; muncul hanya bila dicari (Rows: "Clipboard History", "Emoji").
       const apps = await invoke("list_apps");
       items.push(...apps.map((app) => ({ ...app, kind: "app" })));
     } else {
+      const cmds = COMMANDS
+        .filter((c) => fuzzy(q, c.keys))
+        .map(({ keys, ...c }) => c);
       const str = await invoke("search_apps", { query: q });
-      items.push(...str.map((hit) => ({ ...hit.item, kind: "app" })));
+      items.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app" })));
     }
   }
 

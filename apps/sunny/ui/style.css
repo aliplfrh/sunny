@@ -16,6 +16,12 @@
   user-select: none;
 }
 
+/* Atribut `hidden` harus menang atas `display: flex/block` di bawah,
+   jika tidak panel mode clipboard ikut tampil di mode aplikasi. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
@@ -46,8 +52,20 @@ body {
 }
 
 .logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
   font-size: 18px;
   line-height: 1;
+}
+
+.hints .hint-icon {
+  width: 13px;
+  height: 13px;
+  object-fit: contain;
+  vertical-align: -2px;
+  margin-right: 4px;
 }
 
 .query {
