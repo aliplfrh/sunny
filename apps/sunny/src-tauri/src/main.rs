@@ -27,6 +27,7 @@ fn show_or_focus_main_window(app: &tauri::AppHandle) {
 }
 
 use std::sync::Mutex;
+use sun_core::clipboard::{ClipboardStore, ClipEntry};
 
 /// Cache in-memory daftar aplikasi — menghindari disk IO per-tombol (perf fix).
 pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
@@ -90,6 +91,18 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     }
 }
 
+/// Seluruh riwayat clipboard (terbaru dulu).
+#[tauri::command]
+fn clip_history(store: tauri::State<'_, ClipboardStore>) -> Vec<ClipEntry> {
+    store.0.lock().unwrap().clone()
+}
+
+/// Dataset emoji penuh (dicache khusus backend; disaring di frontend).
+#[tauri::command]
+fn emoji_all() -> &'static [sun_core::emoji::EmojiItem] {
+    sun_core::emoji::all()
+}
+
 #[cfg(target_os = "windows")]
 fn launching_app(path: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
@@ -115,6 +128,7 @@ fn launching_app(path: &str) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .manage(AppState(Mutex::new(Vec::new())))
+        .manage(ClipboardStore::new())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -131,7 +145,9 @@ fn main() {
             run_app,
             hide_main_window,
             calc,
-            copy_to_clipboard
+            copy_to_clipboard,
+            clip_history,
+            emoji_all
         ])
         .setup(|app| {
             use tauri::menu::MenuBuilder;
@@ -198,6 +214,35 @@ fn main() {
                     let _ = handle.emit("sunny:apps-updated", ());
                 }
             });
+
+            // ── Service clipboard history (Fase 2) ──
+            // Load riwayat dari disk, lalu watcher polling ringan tiap 400ms.
+            {
+                use std::time::Duration;
+                app.state::<ClipboardStore>().load();
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let mut last_seq = sun_platform::clipboard_sequence();
+                    loop {
+                        std::thread::sleep(Duration::from_millis(400));
+                        let seq = sun_platform::clipboard_sequence();
+                        if seq == last_seq {
+                            continue;
+                        }
+                        last_seq = seq;
+                        // Isi berubah — baca teksnya
+                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                            if let Ok(text) = cb.get_text() {
+                                let store = handle.state::<ClipboardStore>();
+                                if store.push(&text) {
+                                    store.save();
+                                    let _ = handle.emit("sunny:clip-updated", ());
+                                }
+                            }
+                        }
+                    }
+                });
+            }
 
             Ok(())
         })

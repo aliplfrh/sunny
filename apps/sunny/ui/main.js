@@ -5,8 +5,13 @@ const { listen } = window.__TAURI__.event;
 const queryEl = document.getElementById("query");
 const listEl = document.getElementById("list");
 
-let items = []; // item gabungan: {kind:"calc"|"app", ...}
+let mode = "apps"; // "apps" | "emoji" | "clip"
+const ALL_EMOJI = await invoke("emoji_all"); // dataset penuh, disaring di sini
+let items = [];
 let selected = 0;
+
+const MODE_LABEL = { apps: "Cari aplikasi…", emoji: "Cari emoji…", clip: "Filter riwayat clipboard…" };
+queryEl.placeholder = MODE_LABEL[mode];
 
 function hideWindow() {
   invoke("hide_main_window");
@@ -18,6 +23,11 @@ function iconElFor(item) {
   if (item.kind === "calc") {
     icon.classList.add("calc");
     icon.textContent = "=";
+  } else if (item.kind === "cmd") {
+    icon.textContent = item.icon;
+  } else if (item.kind === "emoji") {
+    icon.classList.add("emoji");
+    icon.textContent = item.emoji;
   } else if (item.icon) {
     const img = document.createElement("img");
     img.src = item.icon;
@@ -35,9 +45,11 @@ function render() {
   if (!items.length) {
     const div = document.createElement("div");
     div.className = "empty";
-    div.textContent = queryEl.value
-      ? "Tidak ada yang cocok."
-      : "Sunny siap. Ketik aplikasi atau rumus (mis. 12*7)";
+    div.textContent =
+      mode === "emoji" ? "Tidak ada emoji yang cocok."
+      : mode === "clip" ? "Riwayat clipboard masih kosong."
+      : queryEl.value ? "Tidak ada yang cocok."
+      : "Sunny siap. Ketik aplikasi, rumus (12*7), ':' untuk emoji, atau pilih perintah di bawah.";
     listEl.appendChild(div);
     return;
   }
@@ -53,12 +65,24 @@ function render() {
     name.className = "name";
     if (item.kind === "calc") {
       name.innerHTML = `${escapeHtml(item.expr)} <b class="val">= ${escapeHtml(item.value)}</b>`;
+    } else if (item.kind === "clip") {
+      name.className += " clip";
+      name.textContent = item.text;
+    } else if (item.kind === "cmd") {
+      name.textContent = item.name;
+    } else if (item.kind === "emoji") {
+      name.innerHTML = `${escapeHtml(item.emoji)} <span class="sub-inline">${escapeHtml(item.name)}</span>`;
     } else {
       name.textContent = item.name;
     }
+
     const sub = document.createElement("div");
     sub.className = "sub";
-    sub.textContent = item.kind === "calc" ? "Enter: salin" : "Start Menu";
+    if (item.kind === "calc") sub.textContent = "Enter: salin";
+    else if (item.kind === "clip") sub.textContent = "Enter: salin kembali";
+    else if (item.kind === "emoji") sub.textContent = "Enter: salin";
+    else if (item.kind === "cmd") sub.textContent = "Enter: buka";
+    else sub.textContent = "Start Menu";
 
     row.append(name, sub);
     row.onclick = () => activate(i);
@@ -75,29 +99,79 @@ function render() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) => ({
+  return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[c]);
 }
 
-async function refresh() {
-  const q = queryEl.value.trim();
-  items = [];
+function labelFor(hit) {
+  const e = hit.emoji || "";
+  return `${e} ${hit.name}`;
+}
 
-  // Kalkulator: hasil ekspresi = item pertama (index 0)
-  if (q) {
-    const value = await invoke("calc", { query: q });
-    if (value != null) {
-      items.push({ kind: "calc", expr: q, value });
+const fuzzy = (needle, hay) => {
+  // pencocokan longgar sederhana: semua karakter urut muncul
+  const n = needle.toLowerCase(), h = hay.toLowerCase();
+  let i = 0;
+  for (const ch of n) {
+    i = h.indexOf(ch, i);
+    if (i === -1) return false;
+    i++;
+  }
+  return true;
+};
+
+async function refresh() {
+  const raw = queryEl.value;
+  const q = raw.trim();
+
+  // Promosi/demosi mode via awalan ":" (ala Slack/Discord)
+  if (mode !== "clip") {
+    if (raw.startsWith(":")) {
+      if (mode !== "emoji") {
+        mode = "emoji";
+        queryEl.placeholder = MODE_LABEL.emoji;
+      }
+    } else if (mode === "emoji") {
+      mode = "apps";
+      queryEl.placeholder = MODE_LABEL.apps;
     }
   }
 
-  if (!q) {
-    const apps = await invoke("list_apps");
-    items.push(...apps.map((app) => ({ ...app, kind: "app" })));
+  items = [];
+
+  if (mode === "emoji") {
+    const needle = q.replace(/^:+/, "").trim();
+    const pool = ALL_EMOJI.filter(
+      (e) => !needle ||
+        e.name.toLowerCase().includes(needle.toLowerCase()) ||
+        e.keywords.toLowerCase().includes(needle.toLowerCase())
+    ).slice(0, 60);
+    items.push(...pool.map((e) => ({ ...e, kind: "emoji" })));
+  } else if (mode === "clip") {
+    const clips = await invoke("clip_history");
+    const filtered = q
+      ? clips.filter((c) => c.text.toLowerCase().includes(q.toLowerCase()))
+      : clips;
+    items.push(...filtered.slice(0, 60).map((c) => ({ ...c, kind: "clip" })));
+    if (items.length) items.unshift({ kind: "cmd", cmd: "apps", icon: "◀️", name: "Kembali ke pencarian aplikasi" });
   } else {
-    const hits = await invoke("search_apps", { query: q });
-    items.push(...hits.map((hit) => ({ ...hit.item, kind: "app" })));
+    // mode apps — hasil kalkulator di urutan pertama bila kueri valid
+    if (q) {
+      const value = await invoke("calc", { query: q });
+      if (value != null) items.push({ kind: "calc", expr: q, value });
+    }
+    if (!q) {
+      items.push(
+        { kind: "cmd", cmd: "clip", icon: "📋", name: "Riwayat Clipboard" },
+        { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker (atau ketik ':')" }
+      );
+      const apps = await invoke("list_apps");
+      items.push(...apps.map((app) => ({ ...app, kind: "app" })));
+    } else {
+      const str = await invoke("search_apps", { query: q });
+      items.push(...str.map((hit) => ({ ...hit.item, kind: "app" })));
+    }
   }
 
   selected = 0;
@@ -108,10 +182,19 @@ async function activate(i) {
   const item = items[i];
   if (!item) return;
   if (item.kind === "calc") {
-    const ok = navigator.clipboard
-      ?.writeText(item.value)
-      .catch(() => invoke("copy_to_clipboard", { text: item.value }));
-    await ok;
+    const value = item.value;
+    await navigator.clipboard?.writeText(value).catch(() => invoke("copy_to_clipboard", { text: value }));
+    hideWindow();
+  } else if (item.kind === "cmd") {
+    mode = item.cmd;
+    queryEl.value = "";
+    queryEl.placeholder = MODE_LABEL[mode];
+    refresh();
+  } else if (item.kind === "clip") {
+    await navigator.clipboard?.writeText(item.text).catch(() => invoke("copy_to_clipboard", { text: item.text }));
+    hideWindow();
+  } else if (item.kind === "emoji") {
+    await navigator.clipboard?.writeText(item.emoji).catch(() => invoke("copy_to_clipboard", { text: item.emoji }));
     hideWindow();
   } else {
     invoke("run_app", { path: item.path });
@@ -124,10 +207,12 @@ listen("sunny:shown", () => queryEl.focus());
 window.addEventListener("focus", () => queryEl.focus());
 queryEl.focus();
 
-// ── Ikon siap di background → segarkan daftar ──
+// ── Data berubah di background → segarkan ──────
 listen("sunny:apps-updated", () => refresh());
+listen("sunny:clip-updated", () => {
+  if (mode === "clip") refresh();
+});
 
-// ── Input & keyboard ───────────────────────────
 queryEl.addEventListener("input", refresh);
 
 window.addEventListener("keydown", (e) => {
@@ -142,9 +227,14 @@ window.addEventListener("keydown", (e) => {
     selected = Math.max(selected - 1, 0);
     render();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Backspace" && !queryEl.value && mode !== "apps") {
+    e.preventDefault();
+    mode = "apps";
+    queryEl.placeholder = MODE_LABEL.apps;
+    refresh();
   } else if (e.key === "Enter") {
     e.preventDefault();
-    if (items[selected]) activate(selected);
+    activate(selected);
   } else if (e.key === "Escape") {
     e.preventDefault();
     hideWindow();

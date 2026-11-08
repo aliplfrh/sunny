@@ -6,4 +6,6 @@
 
 pub mod apps;
 pub mod calc;
+pub mod clipboard;
+pub mod emoji;
 pub mod search;

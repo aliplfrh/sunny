@@ -133,6 +133,19 @@ mod windows_imp {
 #[cfg(windows)]
 pub use windows_imp::extract_icon_png;
 
+/// Nomor urut global clipboard Windows — naik setiap isi clipboard berubah.
+/// Dibandingkan antar-poll untuk mendeteksi perubahan tanpa isi membaca (murah).
+#[cfg(windows)]
+pub fn clipboard_sequence() -> u32 {
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+#[cfg(not(windows))]
+pub fn clipboard_sequence() -> u32 {
+    0
+}
+
 #[cfg(not(windows))]
 /// Platform lain belum diimplementasi di fase ini.
 pub fn extract_icon_png(_path: &str) -> Option<Vec<u8>> {

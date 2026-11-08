@@ -3050,6 +3050,7 @@ dependencies = [
  "fuzzy-matcher",
  "meval",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

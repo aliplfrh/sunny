@@ -16,3 +16,4 @@ Out-of-the-box features of the upstream project Sunny ports from:
 app search, clipboard history, text expander (snippets), file search,
 emoji picker, calculator, window switcher, and extension support
 compatible with the Raycast extension ecosystem.
+Emoji dataset: generated from github/gemoji (MIT) via scripts/make-emojis.ps1.

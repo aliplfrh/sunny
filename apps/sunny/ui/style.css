@@ -102,6 +102,21 @@ body {
   font-size: 15px;
 }
 
+.item .icon.emoji {
+  font-size: 18px;
+  background: transparent;
+}
+
+.item .name.clip {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.sub-inline {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 .item .name {
   flex: 1;
   white-space: nowrap;
