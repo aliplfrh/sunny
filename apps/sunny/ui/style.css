@@ -19,7 +19,9 @@
 html,
 body {
   height: 100%;
-  background: transparent; /* window Tauri transparan: rounded di CSS */
+  /* Jendela opaque — transl_usersi WebView2 dianggap tidak dapat diandalkan;
+     Windows 11 sendiri yang membulatkan sudut jendela di lapisan OS. */
+  background: #131318;
   overflow: hidden;
   font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
@@ -28,13 +30,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Solid hampir-opak — WebView2 tidak merender backdrop-filter dengan
-     benar pada window transparan (bug: elemen jadi penuh transparan). */
-  background: rgba(20, 20, 24, 0.97);
+  background: transparent;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
 
 /* ── Search bar ─────────────────────────────── */

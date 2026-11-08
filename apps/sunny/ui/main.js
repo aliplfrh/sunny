@@ -25,7 +25,7 @@ function iconElFor(item) {
     img.draggable = false;
     icon.appendChild(img);
   } else {
-    icon.textContent = "🚀"; // fallback bila ekstraksi ikon gagal
+    icon.textContent = "🚀"; // fallback bila ikon belum tersedia
   }
   return icon;
 }
@@ -56,7 +56,6 @@ function render() {
     } else {
       name.textContent = item.name;
     }
-
     const sub = document.createElement("div");
     sub.className = "sub";
     sub.textContent = item.kind === "calc" ? "Enter: salin" : "Start Menu";
@@ -95,10 +94,10 @@ async function refresh() {
 
   if (!q) {
     const apps = await invoke("list_apps");
-    items.push(...apps.map((item) => ({ kind: "app", item })));
+    items.push(...apps.map((app) => ({ ...app, kind: "app" })));
   } else {
     const hits = await invoke("search_apps", { query: q });
-    items.push(...hits.map((hit) => ({ kind: "app", item: hit.item })));
+    items.push(...hits.map((hit) => ({ ...hit.item, kind: "app" })));
   }
 
   selected = 0;
@@ -115,7 +114,7 @@ async function activate(i) {
     await ok;
     hideWindow();
   } else {
-    invoke("run_app", { path: item.item.path });
+    invoke("run_app", { path: item.path });
     hideWindow();
   }
 }
@@ -145,11 +144,7 @@ window.addEventListener("keydown", (e) => {
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter") {
     e.preventDefault();
-    if (items[selected]?.kind === "calc" && selected === 0) {
-      activate(selected);
-    } else if (items[selected]) {
-      activate(selected);
-    }
+    if (items[selected]) activate(selected);
   } else if (e.key === "Escape") {
     e.preventDefault();
     hideWindow();
