@@ -1,45 +1,51 @@
-# Roadmap Sunny
+# Sunny Roadmap
 
-Port penuh Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
+Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
 
-## Fase 0 — Fondasi (saat ini)
-- [x] Keputusan lisensi: port penuh → GPL-3.0
-- [x] Keputusan stack UI: Tauri v2 (WebView2) demi tampilan Raycast-look
-- [x] Keputusan platform: Windows dulu
+## Phase 0 — Foundation (current)
+
+- [x] License decision: full port → GPL-3.0
+- [x] UI stack decision: Tauri v2 (WebView2) for Raycast-like appearance
+- [x] Platform decision: Windows first
 - [x] Repo, LICENSE, NOTICE, README, ROADMAP, PORT-MAP
-- [ ] Scaffold workspace Cargo (`crates/sun-core`, `crates/sun-platform`)
-- [ ] Scaffold aplikasi Tauri (`apps/sunny`)
-- [ ] Clone shallow repo vicinae sebagai referensi porting (jangan dimodifikasi)
-- [ ] Window overlay ala Raycast: frameless, selalu di atas, muncul tepat di tengah sesuai monitor aktif, hotkey global (default: Alt+Space)
+- [ ] Scaffold Cargo workspace (`crates/sun-core`, `crates/sun-platform`)
+- [ ] Scaffold Tauri application (`apps/sunny`)
+- [ ] Shallow clone Vicinae repo as porting reference (do not modify)
+- [ ] Raycast-style overlay window: frameless, always-on-top, centered on active monitor, global hotkey (default: Alt+Space)
 
-## Fase 1 — MVP (launcher usable)
-- [ ] Mesin pencarian fuzzy (port konsep dari vicinae) + ranking berbasis frekuensi & recency
-- [ ] Indeks aplikasi Windows (Start Menu + installed apps)
-- [ ] Kalkulator
-- [ ] UI list view ala Raycast (tampilan + binding keyboard ↑↓, Enter, Esc, Tab)
-- [ ] Peluncuran aplikasi (rilis proses dengan benar)
-- [ ] Autorun saat start (opsional)
+## Phase 1 — MVP (usable launcher)
 
-## Fase 2 — Fitur inti ala vicinae
-- [ ] Riwayat clipboard (daemon + penyimpanan terenkripsi/opsional)
+- [ ] Fuzzy search engine (ported concept from Vicinae) + frequency & recency-based ranking
+- [ ] Windows application index (Start Menu + installed apps)
+- [ ] Calculator
+- [ ] Raycast-style list view UI (display + keyboard bindings ↑↓, Enter, Esc, Tab)
+- [ ] Application launching (proper process spawning)
+- [ ] Autorun on startup (optional)
+
+## Phase 2 — Core Vicinae Features
+
+- [ ] Clipboard history (daemon + encrypted/optional storage)
 - [ ] Text expander / snippet
 - [ ] Emoji picker
-- [ ] File search (indeks cepat ala Everything/ripgrep)
+- [ ] File search (fast index à la Everything/ripgrep)
 - [ ] Window switcher
 
-## Fase 3 — Sistem ekstensi
-- [ ] Desain API extension Sunny sendiri
-- [ ] Kompatibilitas subset perintah skrip Raycast
-- [ ] (Opsional/bertahap) Kompatibilitas ekstensi React Raycast
+## Phase 3 — Extension System
 
-## Fase 4 — Paritas dengan vicinae
-- [ ] Store ekstensi
-- [ ] AI chat / dictation (stub integrasi)
-- [ ] Kontrol volume, font browser, dsb.
-- [ ] Linux (wlr/X11) dan macOS
+- [ ] Design Sunny's own extension API
+- [ ] Raycast script command subset compatibility
+- [ ] (Optional/gradual) Raycast React extension compatibility
 
-## Prinsip porting
-1. **UI ditulis ulang, bukan diterjemahkan**: QML → web UI mirip Raycast; logika C++ → Rust idiomatis (aman, tanpa tandingan 1:1 baris per baris).
-2. **Referensi dari vicinae dipetakan** di `docs/PORT-MAP.md` — setiap modul dicantumkan file sumber upstream-nya.
-3. **Windows dulu**, abstraksi di `sun-platform` agar Linux/macOS menyusul tanpa refactor besar.
-4. Setiap fase harus membuahkan aplikasi yang *usable*, bukan setengah jalan.
+## Phase 4 — Parity with Vicinae
+
+- [ ] Extension store
+- [ ] AI chat / dictation (integration stub)
+- [ ] Volume control, font browser, etc.
+- [ ] Linux (wlr/X11) and macOS
+
+## Porting Principles
+
+1. **UI is rewritten, not translated**: QML → Raycast-like web UI; C++ logic → idiomatic Rust (safe, no line-by-line 1:1 equivalence).
+2. **Vicinae references are mapped** in `docs/PORT-MAP.md` — each module lists its upstream source file.
+3. **Windows first**, with abstraction in `sun-platform` so Linux/macOS can follow without a major refactor.
+4. Each phase must yield a *usable* application, not a half-finished one.
