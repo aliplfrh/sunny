@@ -3,6 +3,16 @@ name = "sun-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Abstraksi platform Sunny (Windows dulu): hotkey, jendela, clipboard"
+description = "Abstraksi platform Sunny (Windows dulu): hotkey, jendela, clipboard, ikon aplikasi"
 
 [dependencies]
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+png = "0.18"

@@ -5,6 +5,7 @@ target/
 node_modules/
 dist/
 apps/sunny/src-gen/
+apps/sunny/src-tauri/gen/
 
 # Referensi upstream (read-only, tidak di-track)
 reference/

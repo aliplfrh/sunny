@@ -1,11 +1,16 @@
 // Sunny UI — komunikasi dengan backend Rust via Tauri command API.
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 
 const queryEl = document.getElementById("query");
 const listEl = document.getElementById("list");
 
 let items = []; // hasil pencarian saat ini
 let selected = 0;
+
+function hideWindow() {
+  invoke("hide_main_window");
+}
 
 function render() {
   listEl.innerHTML = "";
@@ -25,7 +30,15 @@ function render() {
 
     const icon = document.createElement("div");
     icon.className = "icon";
-    icon.textContent = "🚀";
+    if (hit.item.icon) {
+      const img = document.createElement("img");
+      img.src = hit.item.icon;
+      img.alt = "";
+      img.draggable = false;
+      icon.appendChild(img);
+    } else {
+      icon.textContent = "🚀"; // fallback bila ekstraksi ikon gagal
+    }
 
     const name = document.createElement("div");
     name.className = "name";
@@ -63,8 +76,19 @@ async function refresh() {
 
 function launch(hit) {
   invoke("run_app", { path: hit.item.path });
-  window.__TAURI__.window.getCurrentWindow().hide();
+  hideWindow();
 }
+
+// ── Fokus otomatis (bug 1: ga bisa langsung mengetik) ───────────
+// Dipicu setiap kali launcher muncul lewat Alt+Space dari backend.
+listen("sunny:shown", () => queryEl.focus());
+// Bila webview mendapat fokus dengan cara lain.
+window.addEventListener("focus", () => queryEl.focus());
+// Sekali di awal (window visible pertama kali).
+queryEl.focus();
+
+// ── Ikon siap di background → segarkan daftar ───────────────────
+listen("sunny:apps-updated", () => refresh());
 
 // ── Input & keyboard ───────────────────────────
 queryEl.addEventListener("input", refresh);
@@ -84,6 +108,9 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key === "Enter") {
     e.preventDefault();
     if (items[selected]) launch(items[selected]);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    hideWindow(); // bug 2: Esc kini menutup launcher
   }
 });
 

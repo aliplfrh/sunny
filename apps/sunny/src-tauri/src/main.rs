@@ -1,17 +1,20 @@
 // Sunny — launcher ala Raycast. Port GPL-3.0 dari vicinae ke Rust + Tauri.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-/// Toggle window utama (show+focus / hide) — dipanggil dari hotkey global.
+/// Toggle window utama: terlihat → sembunyikan; tidak terlihat → tampilkan + fokus input.
+/// (Perbaikan bug: dulu butuh fokus dulu untuk bisa menutup.)
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
+        if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
             let _ = window.show();
             let _ = window.set_focus();
+            // Memberi tampilan agar langsung meletakkan kursor di search bar
+            let _ = app.emit("sunny:shown", ());
         }
     }
 }
@@ -38,6 +41,14 @@ fn search_apps(query: String) -> Vec<sun_core::search::Ranked<sun_core::apps::Ap
 #[tauri::command]
 fn run_app(path: String) -> Result<(), String> {
     launching_app(&path)
+}
+
+/// Tutup (sembunyikan) jendela — dipanggil frontend (tombol Esc).
+#[tauri::command]
+fn hide_main_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -73,9 +84,37 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![ping, list_apps, search_apps, run_app])
+        .invoke_handler(tauri::generate_handler![
+            ping,
+            list_apps,
+            search_apps,
+            run_app,
+            hide_main_window
+        ])
         .setup(|app| {
             app.global_shortcut().register("Alt+Space")?;
+
+            // Bug 2 yang juga dilaporkan: launcher harus bisa tutup tanpa
+            // harus fokus dulu — klik di luar = sembunyikan (perilaku Raycast).
+            if let Some(window) = app.get_webview_window("main") {
+                let for_event = window.clone();
+                window.on_window_event(move |e| {
+                    if matches!(e, tauri::WindowEvent::Focused(false)) {
+                        let _ = for_event.hide();
+                    }
+                });
+            }
+
+            // Pemanasan cache ikon di background: ekstrak ikon aplikasi sekali,
+            // ke depannya scan loop berlangsung instan + ikon asli tampil.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let new_icons = sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
+                if new_icons > 0 {
+                    let _ = handle.emit("sunny:apps-updated", ());
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())
