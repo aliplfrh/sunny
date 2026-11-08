@@ -1,45 +1,45 @@
-# Peta Port: Vicinae → Sunny
+# Port Map: Vicinae → Sunny
 
-Referensi upstream: https://github.com/vicinaehq/vicinae (GPL-3.0, 2.600+ commit)
+Upstream reference: https://github.com/vicinaehq/vicinae (GPL-3.0, 2,600+ commits)
 
-Ukuran kode upstream (per Nov 2026):
-| Bahasa | Ukuran | Fungsi |
-|---|---|---|
-| C++23 | ±6,8 MB | Core, daemon, framework, modul bawaan |
-| QML | ±715 KB | Seluruh UI (akan ditulis ulang sebagai tampilan web mirip Raycast) |
-| TypeScript/JS | ±330 KB | Runtime & API ekstensi (frontend), alat build ekstensi |
-| Obj-C++/Swift/CMake/Shell | sisanya | macOS, build scripts |
+Upstream code size (as of Nov 2026):
+| Language | Size | Purpose |
+|---|---:|---|
+| C++23 | ±6.8 MB | Core, daemon, framework, built-in modules |
+| QML | ±715 KB | Entire UI (to be rewritten as a Raycast-like web view) |
+| TypeScript/JS | ±330 KB | Extension runtime & API (frontend), extension build tools |
+| Obj-C++/Swift/CMake/Shell | remainder | macOS, build scripts |
 
-## Peta modul berikut diteruskan (dilengkapi setelah clone referensi upstream)
+## Module map to carry forward (to be completed after cloning the upstream reference)
 
-Struktur upstream (shallow clone di `reference/vicinae`, per Nov 2026):
+Upstream structure (shallow clone in `reference/vicinae`, as of Nov 2026):
 
 `src/`: `browser-extension, cli, data-control-server, file-indexer, inference, lib, server, snippet, typescript, wayland-protocols`
 
 `src/lib/`: `common, crypto, figura, fuzzy, glyph, linux-utils, script-command, soulver, vicinae-ipc, xdgpp`
 
-| Modul Sunny | Asal di Vicinae | Strategi |
+| Sunny module | Origin in Vicinae | Strategy |
 |---|---|---|
-| `apps/sunny` (UI) | UI QML vicinae | DITULIS ULANG — web UI bertampilan Raycast (WebView2, bukan Qt Quick) |
-| `apps/sunny` (backend) | `src/server`, `src/main*` | Rust + Tauri v2: jendela frameless, overlay, hotkey, tray |
-| `crates/sun-core` | `src/lib/common`, search/ranking, settings, storage | Port ke Rust sesuai semantik (bukan baris per baris) |
-| `crates/sun-core: fuzzy` | `src/lib/fuzzy` | Perilaku dipetakan ke `SkimMatcherV2` (fuzzy-matcher) — ✅ scaffold awal |
-| `crates/sun-core: apps` | app service (app scanner/launcher) | Windows: enumerasi .lnk Start Menu — ✅ scaffold awal |
-| `crates/sun-core: calculator` | `src/lib/soulver` (backend Soulver) | Rust: `meval`/`evalexpr` untuk Fase 1 |
-| `crates/sun-core: snippets` | `src/snippet` | Fase 2 |
-| `crates/sun-core: file-indexer` | `src/file-indexer` | Fase 2 (file search) |
-| `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows melalui `windows-rs`; Linux menyusul (Wayland/X11) |
-| IPC ekstensi | `src/lib/vicinae-ipc` | Sistem IPC Sunny sendiri (desain lebih ringan) |
-| Extension runtime | `src/lib/figura`, `src/typescript` | **Fase 3** — evaluasi: Node sidecar vs QuickJS |
-| Kalender & UI-helper | `src/lib/glyph`, `src/inference` | Fase 4 / sesuai kebutuhan |
+| `apps/sunny` (UI) | Vicinae QML UI | REWRITE — Raycast-like web UI (WebView2, not Qt Quick) |
+| `apps/sunny` (backend) | `src/server`, `src/main*` | Rust + Tauri v2: frameless window, overlay, hotkey, tray |
+| `crates/sun-core` | `src/lib/common`, search/ranking, settings, storage | Port to Rust with equivalent semantics (not line by line) |
+| `crates/sun-core: fuzzy` | `src/lib/fuzzy` | Map behavior to `SkimMatcherV2` (`fuzzy-matcher`) — ✅ initial scaffold |
+| `crates/sun-core: apps` | app service (app scanner/launcher) | Windows: enumerate Start Menu .lnk files — ✅ initial scaffold |
+| `crates/sun-core: calculator` | `src/lib/soulver` (Soulver backend) | Rust: `meval`/`evalexpr` for Phase 1 |
+| `crates/sun-core: snippets` | `src/snippet` | Phase 2 |
+| `crates/sun-core: file-indexer` | `src/file-indexer` | Phase 2 (file search) |
+| `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows via `windows-rs`; Linux to follow (Wayland/X11) |
+| Extension IPC | `src/lib/vicinae-ipc` | Sunny's own IPC system (lighter design) |
+| Extension runtime | `src/lib/figura`, `src/typescript` | **Phase 3** — evaluate Node sidecar vs. QuickJS |
+| Calendar & UI helpers | `src/lib/glyph`, `src/inference` | Phase 4 / as needed |
 
-## Prohibisi saat porting
-- Jangan tiru arsitektur actor Qt (`QObject`/signal-slot) 1:1 — pakai kanal (channel) & `tokio`/`async` bawaan Rust.
-- Jangan bawa plugin/dependensi Qt — semuanya ada padanannya di ekosistem Rust.
-- Jangan salin teks UI/ikon berhak cipta dari Raycast — tampilan disusun ulang.
-- Simpan sebagai referensi *desain & perilaku* — bukan salinan art.
+## Porting prohibitions
+- Do not copy the Qt actor architecture (`QObject`/signal-slot) 1:1 — use Rust's built-in channels and `tokio`/`async`.
+- Do not bring in Qt plugins/dependencies — equivalents exist in the Rust ecosystem.
+- Do not copy Raycast's copyrighted UI text/icons — redesign the interface.
+- Keep it as a *design and behavior* reference — not an art copy.
 
-## Langkah berikutnya
-1. Clone shallow vicinae → `reference/vicinae` (hanya untuk baca, di-.gitignore)
-2. Katalogisasi struktur `src/` & `figura/` untuk melengkapi peta ini
-3. Scaffold workspace cargo + Tauri
+## Next steps
+1. Shallow-clone Vicinae → `reference/vicinae` (read-only, gitignored)
+2. Catalog the `src/` and `figura/` structures to complete this map
+3. Scaffold the Cargo workspace + Tauri

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,12 +14,12 @@
           id="query"
           class="query"
           type="text"
-          placeholder="Cari aplikasi…"
+          placeholder="Search apps…"
           autocomplete="off"
           spellcheck="false"
           autofocus
         />
-        <select id="clipFilter" class="clip-filter" hidden title="Filter jenis konten">
+        <select id="clipFilter" class="clip-filter" hidden title="Filter content type">
           <option value="all">All</option>
           <option value="text">Text</option>
         </select>
@@ -34,15 +34,15 @@
       </div>
 
       <main class="body">
-        <div class="list" id="list" role="listbox" aria-label="Hasil"></div>
+        <div class="list" id="list" role="listbox" aria-label="Results"></div>
         <aside class="detail" id="detail" hidden></aside>
       </main>
 
       <footer class="hints" id="hints">
-        <span><kbd>↑</kbd><kbd>↓</kbd> navigasi</span>
-        <span><kbd>↵</kbd> pilih</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> select</span>
         <span><kbd>:</kbd> emoji</span>
-        <span><kbd>Alt</kbd>+<kbd>Space</kbd> sembunyikan</span>
+        <span><kbd>Alt</kbd>+<kbd>Space</kbd> hide</span>
       </footer>
     </div>
     <script src="main.js"></script>
