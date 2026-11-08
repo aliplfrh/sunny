@@ -1,0 +1,8 @@
+[package]
+name = "sun-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Abstraksi platform Sunny (Windows dulu): hotkey, jendela, clipboard"
+
+[dependencies]

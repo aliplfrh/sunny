@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sunny</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="sheet">
+      <header class="bar">
+        <span class="logo" aria-hidden="true">☀️</span>
+        <input
+          id="query"
+          class="query"
+          type="text"
+          placeholder="Cari aplikasi…"
+          autocomplete="off"
+          spellcheck="false"
+          autofocus
+        />
+      </header>
+
+      <main class="list" id="list" role="listbox" aria-label="Hasil"></main>
+
+      <footer class="hints">
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigasi</span>
+        <span><kbd>↵</kbd> buka</span>
+        <span><kbd>Alt</kbd>+<kbd>Space</kbd> sembunyikan</span>
+      </footer>
+    </div>
+    <script src="main.js"></script>
+  </body>
+</html>

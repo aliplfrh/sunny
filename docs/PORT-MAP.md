@@ -12,16 +12,26 @@ Ukuran kode upstream (per Nov 2026):
 
 ## Peta modul berikut diteruskan (dilengkapi setelah clone referensi upstream)
 
+Struktur upstream (shallow clone di `reference/vicinae`, per Nov 2026):
+
+`src/`: `browser-extension, cli, data-control-server, file-indexer, inference, lib, server, snippet, typescript, wayland-protocols`
+
+`src/lib/`: `common, crypto, figura, fuzzy, glyph, linux-utils, script-command, soulver, vicinae-ipc, xdgpp`
+
 | Modul Sunny | Asal di Vicinae | Strategi |
 |---|---|---|
-| `apps/sunny` (UI) | `src/*/qml` (UI QML) | DITULIS ULANG — UI web tapi bertampilan Raycast (webview, bukan Qt Quick) |
-| `apps/sunny` (backend) | `src/main.cpp`, `src/main-window.*` | Rust + tauri v2: jendela frameless, overlay, hotkey, tray |
-| `crates/sun-core` | `src/lib` (search, ranking, settings, storage, action, grid, list...) | Pindahkan ke Rust sesuai semantik, bukan baris per baris |
-| `crates/sun-core: fuzzy` | `src/lib/search*` | Samakan perilaku dengan pustaka fuzzy Rust (kandidat: `fuzzy-matcher` / implen khusus) |
-| `crates/sun-platform` | `src/lib/platform/` | Abstraksi Windows via pustaka ekosistem: `windows-rs`, `arboard`, `global-hotkey` |
-| `crates/sun-core: system-run` | `src/lib/services/` (app service, window service...) | `windows-rs`: enumerasi jendela, enumerasi aplikasi Start Menu |
-| `crates/sun-extensions` | `figura/` + TypeScript | **Pada fase lanjut** — runtime ekstensi; evaluasi jalur: subset command script dulu, lalu ekstensi React |
-| Kalkulator | modul kalkulator (di macOS upstream pakai SoulverCore) | Rust: `meval`/`evalexpr` untuk Fase 1 |
+| `apps/sunny` (UI) | UI QML vicinae | DITULIS ULANG — web UI bertampilan Raycast (WebView2, bukan Qt Quick) |
+| `apps/sunny` (backend) | `src/server`, `src/main*` | Rust + Tauri v2: jendela frameless, overlay, hotkey, tray |
+| `crates/sun-core` | `src/lib/common`, search/ranking, settings, storage | Port ke Rust sesuai semantik (bukan baris per baris) |
+| `crates/sun-core: fuzzy` | `src/lib/fuzzy` | Perilaku dipetakan ke `SkimMatcherV2` (fuzzy-matcher) — ✅ scaffold awal |
+| `crates/sun-core: apps` | app service (app scanner/launcher) | Windows: enumerasi .lnk Start Menu — ✅ scaffold awal |
+| `crates/sun-core: calculator` | `src/lib/soulver` (backend Soulver) | Rust: `meval`/`evalexpr` untuk Fase 1 |
+| `crates/sun-core: snippets` | `src/snippet` | Fase 2 |
+| `crates/sun-core: file-indexer` | `src/file-indexer` | Fase 2 (file search) |
+| `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows melalui `windows-rs`; Linux menyusul (Wayland/X11) |
+| IPC ekstensi | `src/lib/vicinae-ipc` | Sistem IPC Sunny sendiri (desain lebih ringan) |
+| Extension runtime | `src/lib/figura`, `src/typescript` | **Fase 3** — evaluasi: Node sidecar vs QuickJS |
+| Kalender & UI-helper | `src/lib/glyph`, `src/inference` | Fase 4 / sesuai kebutuhan |
 
 ## Prohibisi saat porting
 - Jangan tiru arsitektur actor Qt (`QObject`/signal-slot) 1:1 — pakai kanal (channel) & `tokio`/`async` bawaan Rust.

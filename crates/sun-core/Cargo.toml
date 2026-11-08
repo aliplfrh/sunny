@@ -1,0 +1,10 @@
+[package]
+name = "sun-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core Sunny: mesin pencarian, indeks aplikasi, utilities (port konsep dari vicinae src/lib)"
+
+[dependencies]
+serde.workspace = true
+fuzzy-matcher = "0.3"
