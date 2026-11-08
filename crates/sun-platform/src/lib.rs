@@ -146,6 +146,40 @@ pub fn clipboard_sequence() -> u32 {
     0
 }
 
+/// Kirim Ctrl+V ke jendela yang sedang aktif (best-effort) —
+/// melengkapi "Paste to active window" ala Raycast setelah memilih entri.
+#[cfg(windows)]
+pub fn send_paste() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
+    };
+    let mk = |vk: u16, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
+                wScan: 0,
+                dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let inputs = [
+        mk(VK_CONTROL.0, false),
+        mk(VK_V.0, false),
+        mk(VK_V.0, true),
+        mk(VK_CONTROL.0, true),
+    ];
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    sent == inputs.len() as u32
+}
+
+#[cfg(not(windows))]
+pub fn send_paste() -> bool {
+    false
+}
+
 #[cfg(not(windows))]
 /// Platform lain belum diimplementasi di fase ini.
 pub fn extract_icon_png(_path: &str) -> Option<Vec<u8>> {

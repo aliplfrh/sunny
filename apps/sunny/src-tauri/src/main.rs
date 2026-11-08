@@ -91,10 +91,50 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     }
 }
 
-/// Seluruh riwayat clipboard (terbaru dulu).
+/// Seluruh riwayat clipboard (terbaru dulu) lengkap dengan metadata.
 #[tauri::command]
 fn clip_history(store: tauri::State<'_, ClipboardStore>) -> Vec<ClipEntry> {
-    store.0.lock().unwrap().clone()
+    store.snapshot()
+}
+
+/// Status pause watcher clipboard (ala "Pause clipboard" Raycast).
+#[tauri::command]
+fn clip_pause_state(store: tauri::State<'_, ClipboardStore>) -> bool {
+    store.is_paused()
+}
+
+/// Toggle pause/rekam clipboard. Kembalikan status terbaru.
+#[tauri::command]
+fn clip_toggle_pause(store: tauri::State<'_, ClipboardStore>) -> bool {
+    store.toggle_pause()
+}
+
+/// Hapus satu entri riwayat berdasar id.
+#[tauri::command]
+fn clip_delete(id: u64, store: tauri::State<'_, ClipboardStore>) -> bool {
+    let deleted = store.delete(id);
+    if deleted {
+        store.save();
+    }
+    deleted
+}
+
+/// Salin teks lalu tempelkan ke jendela aktif sebelumnya (ala Raycast):
+/// set clipboard → sembunyikan launcher (fokus kembali ke app sebelumnya) →
+/// kirim Ctrl+V. Best-effort: bila SendInput gagal, teks tetap tersalin.
+#[tauri::command]
+fn paste_to_active_window(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    {
+        let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
+        cb.set_text(&text).map_err(|e| format!("clipboard: {e}"))?;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    // Beri waktu OS memindahkan fokus ke jendela sebelumnya sebelum Ctrl+V.
+    std::thread::sleep(std::time::Duration::from_millis(220));
+    let _ = sun_platform::send_paste();
+    Ok(())
 }
 
 /// Dataset emoji penuh (dicache khusus backend; disaring di frontend).
@@ -147,6 +187,10 @@ fn main() {
             calc,
             copy_to_clipboard,
             clip_history,
+            clip_pause_state,
+            clip_toggle_pause,
+            clip_delete,
+            paste_to_active_window,
             emoji_all
         ])
         .setup(|app| {
@@ -230,10 +274,14 @@ fn main() {
                             continue;
                         }
                         last_seq = seq;
+                        // Pause aktif → jangan merekam (ala "Pause clipboard" Raycast)
+                        let store = handle.state::<ClipboardStore>();
+                        if store.is_paused() {
+                            continue;
+                        }
                         // Isi berubah — baca teksnya
                         if let Ok(mut cb) = arboard::Clipboard::new() {
                             if let Ok(text) = cb.get_text() {
-                                let store = handle.state::<ClipboardStore>();
                                 if store.push(&text) {
                                     store.save();
                                     let _ = handle.emit("sunny:clip-updated", ());

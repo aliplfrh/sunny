@@ -11,3 +11,4 @@ serde_json.workspace = true
 base64 = "0.23"
 fuzzy-matcher = "0.3"
 meval = "0.2"
+md-5 = "0.10"

@@ -19,11 +19,26 @@
           spellcheck="false"
           autofocus
         />
+        <select id="clipFilter" class="clip-filter" hidden title="Filter jenis konten">
+          <option value="all">All</option>
+          <option value="text">Text</option>
+        </select>
       </header>
 
-      <main class="list" id="list" role="listbox" aria-label="Hasil"></main>
+      <div class="clip-head" id="clipHead" hidden>
+        <span class="clip-count" id="clipCount">0 items</span>
+        <button class="pause-btn" id="pauseBtn" type="button">
+          <span id="pauseLabel">Pause clipboard</span>
+          <span class="pause-ico" id="pauseIco">⏸</span>
+        </button>
+      </div>
 
-      <footer class="hints">
+      <main class="body">
+        <div class="list" id="list" role="listbox" aria-label="Hasil"></div>
+        <aside class="detail" id="detail" hidden></aside>
+      </main>
+
+      <footer class="hints" id="hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> navigasi</span>
         <span><kbd>↵</kbd> pilih</span>
         <span><kbd>:</kbd> emoji</span>
