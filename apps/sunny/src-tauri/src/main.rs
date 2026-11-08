@@ -26,21 +26,36 @@ fn show_or_focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+use std::sync::Mutex;
+
+/// Cache in-memory daftar aplikasi — menghindari disk IO per-tombol (perf fix).
+pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
+
 #[tauri::command]
 fn ping() -> String {
     "pong".into()
 }
 
-/// Daftar semua aplikasi terinstal (dari Start Menu).
+/// Daftar semua aplikasi terinstal (sumber: cache; fallback scan bila masih kosong).
 #[tauri::command]
-fn list_apps() -> Vec<sun_core::apps::AppEntry> {
-    sun_core::apps::scan_installed_apps()
+fn list_apps(state: tauri::State<'_, AppState>) -> Vec<sun_core::apps::AppEntry> {
+    let mut apps = state.0.lock().unwrap();
+    if apps.is_empty() {
+        *apps = sun_core::apps::scan_installed_apps();
+    }
+    apps.clone()
 }
 
-/// Pencarian fuzzy terhadap aplikasi.
+/// Pencarian fuzzy terhadap aplikasi (memakai cache, tanpa IO).
 #[tauri::command]
-fn search_apps(query: String) -> Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>> {
-    let apps = sun_core::apps::scan_installed_apps();
+fn search_apps(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>> {
+    let mut apps = state.0.lock().unwrap();
+    if apps.is_empty() {
+        *apps = sun_core::apps::scan_installed_apps();
+    }
     sun_core::search::rank(&query, &apps)
 }
 
@@ -99,6 +114,7 @@ fn launching_app(path: &str) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .manage(AppState(Mutex::new(Vec::new())))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -167,11 +183,17 @@ fn main() {
                 });
             }
 
-            // Pemanasan cache ikon di background: ekstrak ikon aplikasi sekali,
-            // ke depannya scan loop berlangsung instan + ikon asli tampil.
+            // Pemanasan cache ikon + isi cache aplikasi di background:
+            // ekstrak ikon sekali, ke depannya scan instan + ikon asli tampil.
             let handle = app.handle().clone();
+            let state_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let new_icons = sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
+                // Isi ulang cache aplikasi (kini ikon asli tersedia)
+                let apps = sun_core::apps::scan_installed_apps();
+                if let Some(st) = state_handle.try_state::<AppState>() {
+                    *st.0.lock().unwrap() = apps;
+                }
                 if new_icons > 0 {
                     let _ = handle.emit("sunny:apps-updated", ());
                 }
