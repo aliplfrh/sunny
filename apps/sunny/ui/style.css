@@ -38,6 +38,17 @@
   --radius: 14px;
   --hairline: rgba(255, 255, 255, 0.08);
 
+  /* Warna sheet & backdrop; ditimpa oleh tema Light. */
+  --sheet-rgb: 18, 18, 21;
+  --page-bg: #131318;
+  --sidebar-bg: rgba(0, 0, 0, 0.22);
+  --field-bg: rgba(255, 255, 255, 0.04);
+  --field-hover: rgba(255, 255, 255, 0.07);
+  --tab-on-bg: rgba(255, 255, 255, 0.1);
+  --switch-off: rgba(255, 255, 255, 0.14);
+  --scroll-thumb: rgba(255, 255, 255, 0.12);
+  --option-bg: #1b1b21;
+
   /* Skala tipografi tunggal — diatur oleh setelan "Font size". */
   --fs: 14px;
   --font-ui: "Sonora Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
@@ -45,6 +56,25 @@
   /* Alpha tint latar. 100% = gelap penuh, 40% = desktop tembus paling kuat.
      Elemen di atas sheet tidak pernah ikut memudar. */
   --bg-tint: 0.9;
+}
+
+/* ── Tema Light ─────────────────────────────────────────── */
+body.theme-light {
+  --bg-soft: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(0, 0, 0, 0.06);
+  --text: #1c1c1f;
+  --text-dim: #6b6b73;
+  --hairline: rgba(0, 0, 0, 0.1);
+
+  --sheet-rgb: 250, 250, 252;
+  --page-bg: #f2f2f5;
+  --sidebar-bg: rgba(0, 0, 0, 0.035);
+  --field-bg: rgba(0, 0, 0, 0.04);
+  --field-hover: rgba(0, 0, 0, 0.07);
+  --tab-on-bg: rgba(0, 0, 0, 0.08);
+  --switch-off: rgba(0, 0, 0, 0.16);
+  --scroll-thumb: rgba(0, 0, 0, 0.18);
+  --option-bg: #ffffff;
 }
 
 /* Pilihan font "System" membatalkan Inter. */
@@ -70,11 +100,80 @@ body {
   height: 100%;
   /* Jendela opaque — transparansi WebView2 dianggap tidak dapat diandalkan;
      Windows 11 sendiri yang membulatkan sudut jendela di lapisan OS. */
-  background: #131318;
+  background: var(--page-bg);
   overflow: hidden;
   font-family: var(--font-ui);
   font-size: var(--fs);
   color: var(--text);
+}
+
+/* ── Titlebar kustom (jendela Settings frameless) ────────
+   Hanya tampil di jendela Settings; launcher tetap tanpa titlebar. */
+.titlebar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 0 0 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(var(--sheet-rgb), 0.55);
+  -webkit-app-region: drag;
+}
+body.settings-window .titlebar {
+  display: flex;
+}
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.titlebar-logo {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.titlebar-title {
+  font-size: calc(var(--fs) * 0.79);
+  color: var(--text-dim);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+.win-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: default;
+  display: grid;
+  place-items: center;
+}
+.win-btn svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.win-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.win-btn.win-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 /* ── Backdrop desktop (snapshot layar) ────────────────────────────────
@@ -85,7 +184,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background-color: #131318;
+  background-color: var(--page-bg);
   background-size: cover;
   background-position: center;
   transform: scale(1.001);
@@ -101,7 +200,7 @@ body.blur-ui .backdrop {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(18, 18, 21, var(--bg-tint));
+  background: rgba(var(--sheet-rgb), var(--bg-tint));
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   overflow: hidden;
@@ -254,8 +353,9 @@ body.blur-ui .backdrop {
 /* ── Footer hints ───────────────────────────── */
 .hints {
   display: flex;
-  gap: 14px;
-  padding: 9px 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
   border-top: 1px solid var(--hairline);
   color: var(--text-dim);
   font-size: calc(var(--fs) * 0.79);
@@ -264,8 +364,22 @@ body.blur-ui .backdrop {
   flex: 1;
 }
 .hints .hint-strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text);
   font-weight: 600;
+}
+.hints .hint-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+}
+.hints .hint-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--hairline);
 }
 
 /* ── Mode clipboard: header + dua pane ──────── */
@@ -286,7 +400,7 @@ body.blur-ui .backdrop {
   background-position: right 8px center;
 }
 .clip-filter option {
-  background: #1b1b21;
+  background: var(--option-bg);
   color: var(--text);
 }
 
@@ -460,7 +574,7 @@ kbd {
   gap: 10px;
   padding: 12px 10px;
   border-right: 1px solid var(--hairline);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--sidebar-bg);
   min-height: 0;
 }
 .settings-nav-head {
@@ -532,15 +646,28 @@ kbd {
   color: var(--text);
 }
 .settings-tab.on {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--tab-on-bg);
   color: var(--text);
   font-weight: 500;
 }
 .settings-tab .tab-ico {
   width: 18px;
-  text-align: center;
-  font-size: calc(var(--fs) * 0.93);
+  height: 18px;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
+  color: inherit;
+}
+.settings-tab .tab-ico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.settings-tab .tab-ico img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
 }
 .settings-tab .tab-label {
   overflow: hidden;
@@ -620,6 +747,17 @@ kbd {
 .settings-row .control .link-btn:hover {
   background: var(--bg-hover);
 }
+.update-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-control .value {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Kartu brand di tab About. */
 .about-card {
@@ -629,7 +767,7 @@ kbd {
   padding: 16px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--field-bg);
 }
 .about-card img {
   width: 44px;
@@ -670,7 +808,7 @@ kbd {
 }
 
 .settings-group {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--field-bg);
   border: 1px solid var(--hairline);
   border-radius: 12px;
   overflow: hidden;
@@ -719,7 +857,7 @@ kbd {
   height: 22px;
   border-radius: 11px;
   border: none;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--switch-off);
   cursor: pointer;
   transition: background 0.16s ease;
   flex-shrink: 0;
@@ -765,7 +903,7 @@ kbd {
   background-position: right 9px center;
 }
 .select option {
-  background: #1b1b21;
+  background: var(--option-bg);
   color: var(--text);
 }
 
@@ -823,7 +961,7 @@ input[type="range"] {
   width: 140px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--switch-off);
   outline: none;
   cursor: pointer;
 }
@@ -841,7 +979,7 @@ input[type="range"]::-webkit-slider-thumb {
 /* Segmented control */
 .segment {
   display: flex;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--field-bg);
   border: 1px solid var(--hairline);
   border-radius: 8px;
   padding: 2px;
@@ -859,7 +997,7 @@ input[type="range"]::-webkit-slider-thumb {
   white-space: nowrap;
 }
 .segment button.on {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--switch-off);
   color: var(--text);
 }
 
@@ -894,6 +1032,40 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* ── Jendela Settings terpisah (ala Raycast) ─────────────
+   Satu bundel UI dipakai dua jendela; di jendela Settings hanya panel
+   setelan yang tampil, tanpa shell launcher. Backdrop desktop tetap
+   dipakai agar opacity & blur bisa dipratinjau di sini juga. */
+body.settings-window {
+  background: var(--page-bg);
+}
+body.settings-window .bar,
+body.settings-window .clip-head,
+body.settings-window .body,
+body.settings-window #hints {
+  display: none !important;
+}
+body.settings-window .sheet {
+  border: none;
+  border-radius: 0;
+  /* Opacity tetap dipratinjau, tapi diberi lantai 0.9: jendela penuh dengan
+     teks kecil jadi tidak terbaca bila desktop di belakangnya kontras. */
+  background: rgba(var(--sheet-rgb), max(var(--bg-tint), 0.9));
+}
+body.settings-window .settings {
+  display: flex !important;
+}
+body.settings-window .settings-nav {
+  width: 232px;
+  padding: 16px 12px;
+}
+body.settings-window .settings-body {
+  padding: 20px 24px 24px;
+}
+body.settings-window .settings-foot {
+  padding: 10px 24px;
+}
+
 /* Mode settings: sembunyikan shell launcher, tampilkan panel setelan. */
 body.settings-open .bar,
 body.settings-open .clip-head,
@@ -917,6 +1089,6 @@ body.no-footer #hints {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scroll-thumb);
   border-radius: 4px;
 }

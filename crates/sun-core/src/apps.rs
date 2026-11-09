@@ -112,7 +112,9 @@ fn icon_cache_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir());
-    let dir = base.join("Sunny").join("icon-cache");
+    // v2: ikon diekstrak dari target `.lnk` (tanpa overlay panah shortcut),
+    // jadi cache lama yang masih berbadge tidak boleh dipakai lagi.
+    let dir = base.join("Sunny").join("icon-cache-v2");
     let _ = fs::create_dir_all(&dir);
     dir
 }
@@ -152,7 +154,9 @@ fn expand_env(raw: &str) -> Option<String> {
     while let Some(start) = rest.find('%') {
         result.push_str(&rest[..start]);
         rest = &rest[start + 1..];
-        let Some(end) = rest.find('%') else { return None };
+        let Some(end) = rest.find('%') else {
+            return None;
+        };
         let var = &rest[..end];
         if var.is_empty() {
             return None;

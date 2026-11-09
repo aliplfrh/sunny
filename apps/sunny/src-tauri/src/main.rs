@@ -39,12 +39,16 @@ pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
 /// Preferensi aktif — dimuat saat start, diubah dari panel Settings.
 pub struct SettingsState(pub Mutex<Settings>);
 
-/// Panel Settings sedang terbuka? Saat terbuka jendela dibuat lebih tinggi,
-/// jadi mode Compact/Expanded baru diterapkan setelah panel ditutup.
+/// Panel Settings kini jendela terpisah; penanda ini dipertahankan agar
+/// mode Compact/Expanded tidak diterapkan saat setelan dibuka.
 pub struct SettingsUiOpen(pub std::sync::atomic::AtomicBool);
 
 /// Snapshot desktop di belakang launcher (data URL PNG) untuk backdrop CSS.
 pub struct BackdropState(pub Mutex<Option<String>>);
+
+/// Snapshot desktop di belakang jendela Settings (terpisah dari launcher,
+/// karena area tangkapnya berbeda).
+pub struct SettingsBackdropState(pub Mutex<Option<String>>);
 
 /// Indeks file pengguna + status pembangunan di background.
 pub struct FileIndexState {
@@ -75,7 +79,8 @@ fn capture_backdrop(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<BackdropState>() {
         *state.0.lock().unwrap() = Some(url.clone());
     }
-    let _ = app.emit("sunny:backdrop", url);
+    // Hanya jendela launcher: jendela Settings punya snapshot sendiri.
+    let _ = app.emit_to("main", "sunny:backdrop", url);
 }
 
 /// Ubah ukuran jendela sesuai mode (Compact/Expanded) lalu pusatkan kembali.
@@ -229,6 +234,12 @@ fn backdrop_get(state: tauri::State<'_, BackdropState>) -> Option<String> {
     state.0.lock().unwrap().clone()
 }
 
+/// Backdrop khusus jendela Settings (area tangkapnya berbeda dari launcher).
+#[tauri::command]
+fn settings_backdrop_get(state: tauri::State<'_, SettingsBackdropState>) -> Option<String> {
+    state.0.lock().unwrap().clone()
+}
+
 /// Cari file/folder di indeks pengguna (fuzzy, seperti "Search Files" Raycast).
 #[tauri::command]
 fn search_files(
@@ -300,23 +311,124 @@ fn reveal_path(path: String) -> Result<(), String> {
     }
 }
 
-/// Ukuran jendela saat panel Settings dibuka/ditutup — tidak mengubah setelan.
-#[tauri::command]
-fn settings_resize(app: tauri::AppHandle, open: bool) {
-    use std::sync::atomic::Ordering;
-    app.state::<SettingsUiOpen>()
-        .0
-        .store(open, Ordering::Relaxed);
-    if let Some(window) = app.get_webview_window("main") {
-        if open {
-            // Panel Settings lebih lebar: sidebar tab + isi.
-            let _ = window.set_size(tauri::LogicalSize::new(820.0, 700.0));
-            let _ = window.center();
-        } else {
-            let settings = app.state::<SettingsState>().0.lock().unwrap().clone();
-            apply_window_mode(&app, &settings);
-        }
+/// Ambil snapshot layar di area jendela Settings (harus dipanggil saat
+/// jendela masih tersembunyi) agar opacity/blur bisa dipratinjau di sana.
+fn capture_settings_backdrop(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("settings") else {
+        return;
+    };
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return;
+    };
+    let Some(png) =
+        sun_platform::capture_screen_png(pos.x, pos.y, size.width as i32, size.height as i32)
+    else {
+        return;
+    };
+    use base64::Engine;
+    let url = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    );
+    if let Some(state) = app.try_state::<SettingsBackdropState>() {
+        *state.0.lock().unwrap() = Some(url.clone());
     }
+    // Event terpisah: jangan menimpa backdrop launcher dengan snapshot area Settings.
+    let _ = app.emit_to("settings", "sunny:settings-backdrop", url);
+}
+
+/// Buka jendela Settings terpisah (ala Raycast) dan sembunyikan launcher.
+#[tauri::command]
+fn settings_open(app: tauri::AppHandle) {
+    // Launcher disembunyikan DULU: kalau snapshot diambil saat launcher masih
+    // tampil, backdrop Settings akan memuat launcher itu sendiri.
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
+    // Snapshot + show dijalankan di thread terpisah supaya perintah ini tidak
+    // memblokir UI. Jeda 320 ms memberi compositor waktu menggambar ulang
+    // setelah launcher disembunyikan (120 ms masih menyisakan sisa footer).
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(320));
+        capture_settings_backdrop(&app);
+        if let Some(win) = app.get_webview_window("settings") {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        }
+    });
+}
+
+/// Tutup jendela Settings (dipanggil dari tombol Esc / back).
+#[tauri::command]
+fn settings_close(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.hide();
+    }
+}
+
+// ── Auto-update ────────────────────────────────────────────────────────────
+// Memakai tauri-plugin-updater. Endpoint & public key ada di tauri.conf.json;
+// artefak rilis ditandatangani dengan kunci privat yang sama.
+
+/// Ringkasan rilis baru yang dikirim ke UI.
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    version: String,
+    current_version: String,
+    body: Option<String>,
+    date: Option<String>,
+}
+
+/// Cek apakah ada versi lebih baru di endpoint updater.
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let found = updater.check().await.map_err(|e| e.to_string())?;
+    Ok(found.map(|u| UpdateInfo {
+        version: u.version.clone(),
+        current_version: u.current_version.clone(),
+        body: u.body.clone(),
+        date: u.date.map(|d| d.to_string()),
+    }))
+}
+
+/// Unduh + pasang pembaruan, lalu keluar agar installer bisa mengganti biner.
+/// Progres dikirim ke UI lewat event `sunny:update-progress`.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("No update available".into());
+    };
+
+    let handle = app.clone();
+    let mut downloaded: u64 = 0;
+    let mut total: u64 = 0;
+
+    update
+        .download_and_install(
+            move |chunk, content_length| {
+                if let Some(len) = content_length {
+                    total = len;
+                }
+                downloaded += chunk as u64;
+                let pct = if total > 0 {
+                    (downloaded * 100 / total).min(100) as u8
+                } else {
+                    0
+                };
+                let _ = handle.emit("sunny:update-progress", pct);
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Di Windows installer sudah dijalankan dan proses ini akan ditutup.
+    Ok(())
 }
 
 /// Preferensi tersimpan (dipakai UI saat panel Settings dibuka).
@@ -358,9 +470,8 @@ fn settings_reset(
 /// Lokasi folder setelan (untuk tombol "Open settings folder").
 #[tauri::command]
 fn settings_dir() -> String {
-    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
-        std::env::temp_dir().to_string_lossy().to_string()
-    });
+    let base = std::env::var("LOCALAPPDATA")
+        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
     format!("{base}\\Sunny")
 }
 
@@ -421,11 +532,14 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_or_focus_main_window(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState(Mutex::new(Vec::new())))
         .manage(ClipboardStore::new())
         .manage(SettingsState(Mutex::new(Settings::load())))
         .manage(SettingsUiOpen(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackdropState(Mutex::new(None)))
+        .manage(SettingsBackdropState(Mutex::new(None)))
         .manage(FileIndexState {
             files: Mutex::new(Vec::new()),
             ready: std::sync::atomic::AtomicBool::new(false),
@@ -454,6 +568,7 @@ fn main() {
             paste_to_active_window,
             emoji_all,
             backdrop_get,
+            settings_backdrop_get,
             search_files,
             rebuild_file_index,
             open_path,
@@ -463,7 +578,10 @@ fn main() {
             settings_dir,
             settings_preview,
             settings_update,
-            settings_resize
+            settings_open,
+            settings_close,
+            update_check,
+            update_install
         ])
         .setup(|app| {
             use tauri::menu::MenuBuilder;
@@ -533,6 +651,18 @@ fn main() {
                 let for_event = window.clone();
                 window.on_window_event(move |e| {
                     if matches!(e, tauri::WindowEvent::Focused(false)) {
+                        let _ = for_event.hide();
+                    }
+                });
+            }
+
+            // Jendela Settings: tombol X hanya menyembunyikan (bukan menutup),
+            // supaya bisa dibuka lagi tanpa membuat ulang WebView.
+            if let Some(win) = app.get_webview_window("settings") {
+                let for_event = win.clone();
+                win.on_window_event(move |e| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                        api.prevent_close();
                         let _ = for_event.hide();
                     }
                 });

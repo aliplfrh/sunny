@@ -49,8 +49,14 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
   - [x] `Enter` opens with the default app; `Ctrl+R` reveals the file in File Explorer
   - [x] Index built once per launch on a background thread; UI never blocks on disk IO
 - [x] **Settings** (Raycast/Sonora-inspired), persisted to `%LOCALAPPDATA%\Sunny\settings.json`
+  - [x] **Separate Settings window** (like Raycast): its own frameless window with an integrated
+        titlebar (logo, title, minimize/maximize/close), opened with `Ctrl+,` or the tray menu;
+        closing it only hides it, so reopening is instant
   - [x] Tabbed panel with a Raycast-style sidebar: **General**, **Launcher**, **Shortcuts**,
         **Keyboard**, **Advanced**, **About Sunny**, plus a settings search box
+  - [x] Consistent inline-SVG tab icons (Launcher uses the Sunny mark)
+  - [x] **Theme** — System / Light / Dark, applied to both the launcher and the Settings window
+  - [x] Opacity and blur are previewed inside the Settings window too (desktop snapshot backdrop)
   - [x] General: Open at Login (`HKCU\...\Run`), Show in System Tray, Sunny Hotkey
         (click-to-capture, requires a modifier, re-registers the global shortcut)
   - [x] Launcher: Font — **Sonora (Inter)** default or System; Font size 12–20 px;
@@ -61,10 +67,19 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
   - [x] Keyboard: Vim navigation (`Ctrl+J` / `Ctrl+K`), Backspace-to-app-search toggle,
         configurable emoji prefix
   - [x] Advanced: open the settings folder, reset all settings, file-index status and rebuild
-  - [x] About Sunny: version, license, bundled font, emoji data source, platform
+  - [x] About Sunny: version, license, bundled font, emoji data source, platform,
+        **Check for Updates** (signed auto-update via `tauri-plugin-updater`)
   - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
   - [x] Reliable persistence: single-instance guard (no competing writers) and pending-save flush
         when the panel closes or the window hides
+- [x] **Auto-update** — signed NSIS updater artifacts published by GitHub Actions
+  - [x] `latest.json` manifest at `releases/latest/download/latest.json`
+  - [x] In-app check, download with progress, install and relaunch
+  - [x] Release workflow (`.github/workflows/release.yml`) triggered by a `v*` tag
+- [x] **Root file search** — files appear directly in the main search field
+      (`include_files`, `file_results`), no need to open the "Search Files" command
+- [x] **Clean app icons** — `.lnk` shortcuts are resolved to their target executable before icon
+      extraction, so the shortcut-arrow overlay badge is gone
 - [ ] Window switcher
 
 ## Porting Principles

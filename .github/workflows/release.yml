@@ -1,0 +1,100 @@
+name: Release
+
+# Publishes a signed NSIS installer plus the updater manifest (`latest.json`)
+# that Sunny's built-in auto-updater polls at
+# https://github.com/aliplfrh/sunny/releases/latest/download/latest.json
+#
+# Trigger: push a tag like `v1.0.0` (or run manually from the Actions tab).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $conf = Get-Content apps/sunny/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          "version=$($conf.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (signed updater artifacts)
+        shell: pwsh
+        working-directory: apps/sunny
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx --yes @tauri-apps/cli@2 build
+
+      - name: Collect artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $bundle = "target/release/bundle/nsis"
+          $setup = Get-ChildItem $bundle -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS installer not found in $bundle" }
+          $sig = Get-ChildItem $bundle -Filter "*-setup.exe.sig" | Select-Object -First 1
+          if (-not $sig) { throw "Updater signature not found (createUpdaterArtifacts must be true)" }
+          "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+          "sig=$($sig.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($setup.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Generate latest.json
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SETUP_NAME: ${{ steps.artifacts.outputs.name }}
+          SIG_PATH: ${{ steps.artifacts.outputs.sig }}
+        run: |
+          $signature = (Get-Content $env:SIG_PATH -Raw).Trim()
+          $manifest = [ordered]@{
+            version   = $env:VERSION
+            notes     = "Sunny v$($env:VERSION)"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url       = "https://github.com/aliplfrh/sunny/releases/download/v$($env:VERSION)/$($env:SETUP_NAME)"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path "latest.json" -Encoding utf8
+          Get-Content latest.json
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SETUP: ${{ steps.artifacts.outputs.setup }}
+          SIG: ${{ steps.artifacts.outputs.sig }}
+        run: |
+          $tag = "v$($env:VERSION)"
+          gh release create $tag $env:SETUP $env:SIG latest.json `
+            --title "Sunny $tag" `
+            --notes "Sunny $tag — see docs/ROADMAP.md for what changed." `
+            --latest

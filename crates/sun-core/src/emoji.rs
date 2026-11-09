@@ -29,15 +29,17 @@ pub fn all() -> &'static [EmojiItem] {
         }
         let raw: Vec<Raw> = serde_json::from_str(EMOJI_JSON).expect("emojis.json rusak");
         raw.into_iter()
-            .map(|Raw {
-                emoji,
-                name,
-                keywords,
-            }| EmojiItem {
-                emoji,
-                name,
-                keywords,
-            })
+            .map(
+                |Raw {
+                     emoji,
+                     name,
+                     keywords,
+                 }| EmojiItem {
+                    emoji,
+                    name,
+                    keywords,
+                },
+            )
             .collect()
     })
 }

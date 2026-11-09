@@ -9,6 +9,24 @@
   <body>
     <div class="backdrop" id="backdrop" aria-hidden="true"></div>
     <div class="sheet">
+      <!-- Titlebar kustom: hanya tampil di jendela Settings (frameless). -->
+      <header class="titlebar" id="titlebar" data-tauri-drag-region>
+        <div class="titlebar-left" data-tauri-drag-region>
+          <img class="titlebar-logo" src="sunny-icon.png" alt="" draggable="false" />
+          <span class="titlebar-title" data-tauri-drag-region>Settings</span>
+        </div>
+        <div class="titlebar-controls">
+          <button class="win-btn" id="winMin" type="button" title="Minimize" aria-label="Minimize">
+            <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 5h6" /></svg>
+          </button>
+          <button class="win-btn" id="winMax" type="button" title="Maximize" aria-label="Maximize">
+            <svg viewBox="0 0 10 10" aria-hidden="true"><rect x="2.5" y="2.5" width="5" height="5" rx="0.6" /></svg>
+          </button>
+          <button class="win-btn win-close" id="winClose" type="button" title="Close" aria-label="Close">
+            <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5l5 5M7.5 2.5l-5 5" /></svg>
+          </button>
+        </div>
+      </header>
       <header class="bar">
         <img class="logo" src="sunny-icon.png" alt="Sunny" draggable="false" />
         <input

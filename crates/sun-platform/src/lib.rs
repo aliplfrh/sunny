@@ -14,10 +14,57 @@ mod windows_imp {
     };
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+
+    /// Resolve target sebuah shortcut `.lnk` (path executable aslinya).
+    /// Dipakai agar ikon diambil dari aplikasi target, bukan dari file `.lnk`
+    /// yang selalu membawa overlay panah shortcut.
+    pub fn resolve_lnk_target(lnk: &str) -> Option<String> {
+        use windows::core::Interface;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED, STGM_READ,
+        };
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+        let wide: Vec<u16> = lnk.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            // Panggilan dari thread background; abaikan bila COM sudah di-init.
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let should_uninit = hr.is_ok();
+            let result = (|| -> Option<String> {
+                let link: IShellLinkW =
+                    CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+                let persist: IPersistFile = link.cast().ok()?;
+                persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+
+                let mut buf = [0u16; 1024];
+                link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+                let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                if len == 0 {
+                    return None;
+                }
+                Some(String::from_utf16_lossy(&buf[..len]))
+            })();
+            if should_uninit {
+                CoUninitialize();
+            }
+            result
+        }
+    }
+
     /// Path lengkap ke executable/shortcut .lnk → PNG bytes (RGBA), None bila gagal.
-    /// SHGetFileInfoW pada .lnk otomatis me-resolve ikon targetnya (perilaku Explorer).
+    /// Untuk `.lnk`, ikon diambil dari target agar overlay panah shortcut hilang.
     pub fn extract_icon_png(path: &str) -> Option<Vec<u8>> {
-        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        let is_lnk = path.to_ascii_lowercase().ends_with(".lnk");
+        let icon_source = if is_lnk {
+            resolve_lnk_target(path).unwrap_or_else(|| path.to_string())
+        } else {
+            path.to_string()
+        };
+        let wide: Vec<u16> = icon_source
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         unsafe {
             let mut sfi = SHFILEINFOW::default();
             let flags = SHGFI_ICON | SHGFI_LARGEICON;
@@ -182,7 +229,7 @@ mod windows_imp {
 }
 
 #[cfg(windows)]
-pub use windows_imp::{capture_screen_png, extract_icon_png};
+pub use windows_imp::{capture_screen_png, extract_icon_png, resolve_lnk_target};
 
 /// Buka file/folder dengan aplikasi default (Windows `ShellExecuteW`).
 /// Tidak lewat `cmd /C start`, jadi path dengan `&`, `%`, kutip, dsb. aman.

@@ -35,6 +35,12 @@ pub struct Settings {
     pub backspace_back: bool,
     /// Navigasi daftar dengan Ctrl+J / Ctrl+K (ala Vim).
     pub vim_nav: bool,
+    /// Sertakan hasil file di pencarian utama (tanpa membuka "Search Files").
+    pub include_files: bool,
+    /// Jumlah maksimum hasil file yang digabung ke pencarian utama.
+    pub file_results: u32,
+    /// "system" | "light" | "dark".
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -52,6 +58,9 @@ impl Default for Settings {
             emoji_prefix: ":".into(),
             backspace_back: true,
             vim_nav: false,
+            include_files: true,
+            file_results: 8,
+            theme: "system".into(),
         }
     }
 }
@@ -98,6 +107,10 @@ impl Settings {
         } else {
             prefix
         };
+        self.file_results = self.file_results.clamp(0, 30);
+        if !matches!(self.theme.as_str(), "light" | "dark") {
+            self.theme = "system".into();
+        }
     }
 
     /// Tinggi jendela (logical px) untuk mode yang aktif.

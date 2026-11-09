@@ -19,6 +19,15 @@ const settingsSavedEl = document.getElementById("settingsSaved");
 const settingsTabsEl = document.getElementById("settingsTabs");
 const settingsSearchEl = document.getElementById("settingsSearch");
 const backdropEl = document.getElementById("backdrop");
+const winMinEl = document.getElementById("winMin");
+const winMaxEl = document.getElementById("winMax");
+const winCloseEl = document.getElementById("winClose");
+
+// Satu bundel UI dipakai dua jendela: launcher (`main`) dan Settings
+// (`settings`). Query string membedakan peran keduanya.
+const IS_SETTINGS_WINDOW =
+  new URLSearchParams(location.search).get("window") === "settings";
+if (IS_SETTINGS_WINDOW) document.body.classList.add("settings-window");
 
 let mode = "apps"; // "apps" | "emoji" | "clip" | "files"
 let settingsOpen = false;
@@ -97,7 +106,9 @@ let backdropFresh = false;
 // Saat start, snapshot mungkin belum selesai diambil → coba beberapa kali.
 let backdropTries = 0;
 function loadBackdrop() {
-  invoke("backdrop_get")
+  // Jendela Settings punya snapshot sendiri (area tangkapnya berbeda).
+  const cmd = IS_SETTINGS_WINDOW ? "settings_backdrop_get" : "backdrop_get";
+  invoke(cmd)
     .then((url) => {
       if (url) setBackdrop(url);
       else if (backdropTries++ < 8) setTimeout(loadBackdrop, 250);
@@ -109,8 +120,15 @@ listen("sunny:backdrop", (e) => {
   backdropFresh = true;
   setBackdrop(e.payload);
 });
+listen("sunny:settings-backdrop", (e) => {
+  setBackdrop(e.payload);
+});
 
 function hideWindow() {
+  if (IS_SETTINGS_WINDOW) {
+    invoke("settings_close").catch(() => {});
+    return;
+  }
   invoke("hide_main_window");
 }
 
@@ -275,33 +293,37 @@ function renderDetail(c) {
   detailEl.append(preview, meta);
 }
 
+/* Footer ala Raycast: kiri = navigasi/emoji, kanan = aksi utama.
+   Petunjuk "hide" dihapus agar baris tetap ringkas. */
 function renderFooter() {
   if (mode === "clip") {
     hintsEl.innerHTML = `
       <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Clipboard History</span>
       <span class="spacer"></span>
-      <span><kbd>↵</kbd> Paste to active window</span>
-      <span><kbd>Ctrl</kbd><kbd>B</kbd> Actions</span>
-      <span><kbd>Ctrl</kbd><kbd>D</kbd> Delete</span>`;
+      <span class="hint-action"><kbd>↵</kbd> Paste</span>
+      <span class="hint-sep"></span>
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>B</kbd> Actions</span>`;
   } else if (mode === "emoji") {
     hintsEl.innerHTML = `
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-      <span><kbd>↵</kbd> copy</span>
-      <span><kbd>⌫</kbd> back</span>`;
+      <span class="hint-strong"><kbd>:</kbd> Emoji</span>
+      <span class="spacer"></span>
+      <span class="hint-action"><kbd>↵</kbd> Copy</span>
+      <span class="hint-sep"></span>
+      <span class="hint-action"><kbd>⌫</kbd> Back</span>`;
   } else if (mode === "files") {
     hintsEl.innerHTML = `
       <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Search Files</span>
       <span class="spacer"></span>
-      <span><kbd>↵</kbd> open</span>
-      <span><kbd>Ctrl</kbd><kbd>R</kbd> reveal in Explorer</span>
-      <span><kbd>⌫</kbd> back</span>`;
+      <span class="hint-action"><kbd>↵</kbd> Open</span>
+      <span class="hint-sep"></span>
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>R</kbd> Reveal</span>`;
   } else {
     hintsEl.innerHTML = `
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-      <span><kbd>↵</kbd> select</span>
-      <span><kbd>:</kbd> emoji</span>
-      <span><kbd>Ctrl</kbd><kbd>,</kbd> settings</span>
-      <span><kbd>Alt</kbd>+<kbd>Space</kbd> hide</span>`;
+      <span class="hint-strong"><kbd>:</kbd> Emoji</span>
+      <span class="spacer"></span>
+      <span class="hint-action"><kbd>↵</kbd> Open</span>
+      <span class="hint-sep"></span>
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>K</kbd> Actions</span>`;
   }
 }
 
@@ -402,16 +424,36 @@ function render() {
 
 /* ── Settings: penerapan + panel ───────────────────────── */
 
+/** Tema efektif: "system" mengikuti preferensi Windows (dark/light). */
+function effectiveTheme() {
+  if (SETTINGS.theme === "light" || SETTINGS.theme === "dark") {
+    return SETTINGS.theme;
+  }
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
+}
+
 function applyAppearance() {
   document.documentElement.style.setProperty("--fs", SETTINGS.font_size + "px");
   // Opacity = alpha tint background saja. Teks/ikon di atas sheet tetap pekat.
   const pct = Math.min(100, Math.max(40, Number(SETTINGS.opacity) || 100));
   document.documentElement.style.setProperty("--bg-tint", (pct / 100).toFixed(2));
+  const theme = effectiveTheme();
+  document.body.classList.toggle("theme-light", theme === "light");
+  document.body.classList.toggle("theme-dark", theme === "dark");
   document.body.classList.toggle("font-system", SETTINGS.font === "system");
   document.body.classList.toggle("blur-ui", !!SETTINGS.blur_ui);
   document.body.classList.toggle("compact", SETTINGS.window_mode === "compact");
   document.body.classList.toggle("no-footer", !SETTINGS.show_footer);
 }
+
+// Ikuti perubahan tema Windows saat setelan "System" aktif.
+window
+  .matchMedia?.("(prefers-color-scheme: light)")
+  ?.addEventListener?.("change", () => {
+    if (SETTINGS.theme === "system") applyAppearance();
+  });
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -620,13 +662,28 @@ function hotkeyControl() {
 
 /* ── Tab panel Settings (ala Raycast) ──────────────────── */
 
+// Ikon tab: SVG garis seragam (stroke 1.6, 18×18) agar senada satu sama lain.
+// Launcher memakai ikon Sunny sendiri, sesuai permintaan.
+const TAB_ICONS = {
+  general:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  shortcuts:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>',
+  keyboard:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 16h6"/></svg>',
+  advanced:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.1 2.1 0 0 1-3-3z"/><path d="M14.7 6.3 17 4l3 3-2.3 2.3"/></svg>',
+  about:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+};
+
 const SETTINGS_TABS = [
-  { id: "general", label: "General", icon: "⚙" },
-  { id: "launcher", label: "Launcher", icon: "🚀" },
-  { id: "shortcuts", label: "Shortcuts", icon: "⌨" },
-  { id: "keyboard", label: "Keyboard", icon: "⌘" },
-  { id: "advanced", label: "Advanced", icon: "🛠" },
-  { id: "about", label: "About Sunny", icon: "☀" },
+  { id: "general", label: "General", icon: TAB_ICONS.general },
+  { id: "launcher", label: "Launcher", icon: "sunny", sunny: true },
+  { id: "shortcuts", label: "Shortcuts", icon: TAB_ICONS.shortcuts },
+  { id: "keyboard", label: "Keyboard", icon: TAB_ICONS.keyboard },
+  { id: "advanced", label: "Advanced", icon: TAB_ICONS.advanced },
+  { id: "about", label: "About Sunny", icon: TAB_ICONS.about },
 ];
 
 let settingsTab = "general";
@@ -702,7 +759,18 @@ function renderSettingsTabs() {
     b.type = "button";
     b.setAttribute("role", "tab");
     b.setAttribute("aria-selected", String(tab.id === settingsTab));
-    b.append(el("span", "tab-ico", tab.icon), el("span", "tab-label", tab.label));
+    const ico = el("span", "tab-ico");
+    if (tab.sunny) {
+      // Launcher memakai ikon Sunny agar senada dengan branding aplikasi.
+      const img = document.createElement("img");
+      img.src = "sunny-icon.png";
+      img.alt = "";
+      img.draggable = false;
+      ico.appendChild(img);
+    } else {
+      ico.innerHTML = tab.icon;
+    }
+    b.append(ico, el("span", "tab-label", tab.label));
     b.onclick = () => {
       settingsTab = tab.id;
       renderSettings();
@@ -750,6 +818,15 @@ function renderSettings() {
     sections.push(
       settingsSectionFiltered("Appearance", [
         maybeRow(
+          "Theme",
+          "Follow Windows, or force a light or dark launcher.",
+          segmentControl(
+            [["system", "System"], ["light", "Light"], ["dark", "Dark"]],
+            SETTINGS.theme,
+            (v) => onSettingChange({ theme: v }, true)
+          )
+        ),
+        maybeRow(
           "Font",
           "Sonora ships Inter — the default Sunny typeface.",
           fontControl()
@@ -791,6 +868,22 @@ function renderSettings() {
           "Display the keyboard hint bar at the bottom.",
           toggleControl(SETTINGS.show_footer, (v) =>
             onSettingChange({ show_footer: v }, true)
+          )
+        ),
+      ]),
+      settingsSectionFiltered("Search", [
+        maybeRow(
+          "Include Files in Root Search",
+          "Show matching files directly in the main search, without opening Search Files.",
+          toggleControl(SETTINGS.include_files, (v) =>
+            onSettingChange({ include_files: v }, true)
+          )
+        ),
+        maybeRow(
+          "File Results",
+          "How many file matches to mix into the main search.",
+          stepperControl(SETTINGS.file_results, 0, 30, (v) =>
+            onSettingChange({ file_results: v }, true)
           )
         ),
       ])
@@ -876,8 +969,21 @@ function renderSettings() {
   } else if (settingsTab === "about") {
     sections.push(aboutCard());
     sections.push(
+      settingsSectionFiltered("Updates", [
+        maybeRow(
+          "Version",
+          "Installed Sunny build.",
+          textValue(APP_VERSION)
+        ),
+        maybeRow(
+          "Check for Updates",
+          "Look for a newer release on GitHub.",
+          updateControl()
+        ),
+      ])
+    );
+    sections.push(
       settingsSectionFiltered("About", [
-        maybeRow("Version", "Sunny desktop launcher.", textValue("0.1.0")),
         maybeRow("License", "Derivative work of Vicinae.", textValue("GPL-3.0")),
         maybeRow("Font", "Bundled from the Sonora project.", textValue("Inter (OFL)")),
         maybeRow("Emoji Data", "Generated from gemoji.", textValue("MIT")),
@@ -895,6 +1001,96 @@ function renderSettings() {
     settingsBodyEl.append(...kept);
   }
 }
+
+/* ── Auto-update (backend: tauri-plugin-updater) ───────── */
+
+const APP_VERSION = "1.0.0";
+let updateState = "idle"; // idle | checking | available | downloading | uptodate | error
+let updateInfo = null;
+let updateError = "";
+let updateProgress = 0;
+
+function updateControl() {
+  const wrap = el("div", "update-control");
+  const status = el("span", "value", updateStatusText());
+  const btn = el("button", "link-btn", updateButtonLabel());
+  btn.type = "button";
+  btn.disabled = updateState === "checking" || updateState === "downloading";
+  btn.onclick = () => {
+    if (updateState === "available") {
+      installUpdate();
+    } else {
+      checkForUpdates();
+    }
+  };
+  wrap.append(status, btn);
+  return wrap;
+}
+
+function updateStatusText() {
+  switch (updateState) {
+    case "checking":
+      return "Checking…";
+    case "available":
+      return `v${updateInfo?.version || "?"} available`;
+    case "downloading":
+      return updateProgress ? `Downloading… ${updateProgress}%` : "Downloading…";
+    case "uptodate":
+      return "Up to date";
+    case "error":
+      return updateError || "Update check failed";
+    default:
+      return "Not checked yet";
+  }
+}
+
+function updateButtonLabel() {
+  if (updateState === "available") return "Install & Restart";
+  if (updateState === "downloading") return "Installing…";
+  if (updateState === "checking") return "Checking…";
+  return "Check Now";
+}
+
+async function checkForUpdates() {
+  updateState = "checking";
+  updateError = "";
+  renderSettings();
+  try {
+    const found = await invoke("update_check");
+    if (found) {
+      updateInfo = found;
+      updateState = "available";
+    } else {
+      updateState = "uptodate";
+    }
+  } catch (err) {
+    updateState = "error";
+    updateError = String(err).slice(0, 120);
+  }
+  renderSettings();
+}
+
+async function installUpdate() {
+  if (!updateInfo) return;
+  updateState = "downloading";
+  updateProgress = 0;
+  renderSettings();
+  try {
+    await invoke("update_install");
+    // Di Windows proses ditutup oleh installer; jaga-jaga bila tidak.
+    await window.__TAURI__.process.relaunch();
+  } catch (err) {
+    updateState = "error";
+    updateError = String(err).slice(0, 120);
+    renderSettings();
+  }
+}
+
+listen("sunny:update-progress", (e) => {
+  updateProgress = Number(e.payload) || 0;
+  const span = settingsBodyEl.querySelector(".update-control .value");
+  if (span) span.textContent = `Downloading… ${updateProgress}%`;
+});
 
 function emojiPrefixControl() {
   const input = document.createElement("input");
@@ -926,6 +1122,11 @@ async function resetSettings() {
 }
 
 function openSettings() {
+  // Di jendela launcher: buka jendela Settings terpisah (ala Raycast).
+  if (!IS_SETTINGS_WINDOW) {
+    invoke("settings_open").catch(() => {});
+    return;
+  }
   settingsOpen = true;
   capturingHotkey = false;
   mode = "apps";
@@ -935,7 +1136,9 @@ function openSettings() {
   settingsSearchEl.value = "";
   document.body.classList.add("settings-open");
   settingsEl.hidden = false;
-  invoke("settings_resize", { open: true }).catch(() => {});
+  // Jendela terpisah: tombol kembali berperan sebagai penutup jendela.
+  settingsBackEl.textContent = "×";
+  settingsBackEl.title = "Close (Esc)";
   renderSettings();
   settingsSearchEl.focus();
 }
@@ -947,7 +1150,10 @@ function closeSettings() {
   document.body.classList.remove("settings-open");
   settingsEl.hidden = true;
   applyAppearance();
-  invoke("settings_resize", { open: false }).catch(() => {});
+  if (IS_SETTINGS_WINDOW) {
+    invoke("settings_close").catch(() => {});
+    return;
+  }
   queryEl.value = "";
   refresh();
   queryEl.focus();
@@ -1089,6 +1295,20 @@ async function refresh() {
         .map(({ keys, ...c }) => c);
       const str = await invoke("search_apps", { query: q });
       items.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app" })));
+
+      // File search langsung di pencarian utama (ala Raycast "Include Files in
+      // Root Search"): hasil file digabung di bawah aplikasi, tanpa harus
+      // membuka perintah "Search Files" lebih dulu.
+      if (SETTINGS.include_files && q.length >= 2) {
+        const res = await invoke("search_files", { query: q });
+        if (seq !== refreshSeq) return;
+        fileIndexReady = !!res.ready;
+        fileTotal = res.total || 0;
+        const files = res.items
+          .slice(0, SETTINGS.file_results || 8)
+          .map((hit) => ({ ...hit.item, kind: "file" }));
+        items.push(...files);
+      }
     }
   }
 
@@ -1143,7 +1363,7 @@ listen("sunny:shown", () => {
 window.addEventListener("focus", () => {
   if (!settingsOpen) queryEl.focus();
 });
-queryEl.focus();
+if (!IS_SETTINGS_WINDOW) queryEl.focus();
 
 // Perubahan yang masih menunggu debounce tetap disimpan saat jendela
 // disembunyikan/ditutup — ini penyebab setelan kadang "hilang".
@@ -1157,6 +1377,14 @@ listen("sunny:clip-updated", () => {
 });
 listen("sunny:files-updated", () => {
   if (mode === "files") refresh();
+});
+/* Setelan diubah di jendela Settings → terapkan juga di jendela ini.
+   Tanpa ini, tema/opacity baru hanya terlihat setelah restart. */
+listen("sunny:settings-updated", (e) => {
+  if (!e.payload) return;
+  Object.assign(SETTINGS, e.payload);
+  applyAppearance();
+  if (mode === "apps") refresh();
 });
 /* Menu tray → buka panel Settings */
 listen("sunny:open-settings", () => openSettings());
@@ -1251,8 +1479,22 @@ window.addEventListener("keydown", (e) => {
     activate(selected);
   } else if (e.key === "Escape") {
     e.preventDefault();
-    hideWindow();
+    if (IS_SETTINGS_WINDOW) {
+      closeSettings();
+    } else {
+      hideWindow();
+    }
   }
 });
 
-refresh();
+// Jendela Settings: langsung tampilkan panelnya saat dimuat.
+if (IS_SETTINGS_WINDOW) {
+  openSettings();
+  // Kontrol titlebar kustom (jendela frameless).
+  const appWindow = window.__TAURI__.window.getCurrentWindow();
+  winMinEl?.addEventListener("click", () => appWindow.minimize());
+  winMaxEl?.addEventListener("click", () => appWindow.toggleMaximize());
+  winCloseEl?.addEventListener("click", () => invoke("settings_close").catch(() => {}));
+} else {
+  refresh();
+}
