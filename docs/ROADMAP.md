@@ -140,6 +140,36 @@ anything that needs the network.
 | 4 | **Windows & Control Panel settings search** | No enumerable API for `ms-settings:`; the page list must be curated by hand. Data work, not code work. |
 | 5 | **QR code generator** | Needs a QR crate; custom styling (colors, module shape, center logo) means rendering SVG directly. |
 | 6 | **Currency conversion and world clock** | World clock is pure timezone math. Currency needs an API, caching, and a parser for `1 usd to rupiah`. Free rate sources are typically daily, not real-time. |
+| 7 | **YouTube download via OmniGet** | Delegates to the external `omniget-cli` instead of bundling yt-dlp and FFMPEG. Estimated 5–8 days; see the dedicated section below. |
+
+### YouTube download via OmniGet (planned, unverified)
+
+Sunny would not download video itself. It would detect a video URL, offer resolution
+choices, and run the separately installed `omniget-cli` as a child process, reading its
+progress output. OmniGet is Tauri 2 + Rust under GPL-3.0, so the stack and licence match.
+
+Spike first: `omniget-cli` ships in every OmniGet release, but its progress output has not
+been checked for machine parsing here. Estimated total **5–8 days**, broken down as:
+
+| Step | Estimate |
+|---|:--:|
+| Spike: fetch `omniget-cli`, confirm `omniget info <url>` lists qualities and that progress lines are parseable | 0.5 day |
+| Detect installed CLI, pin a minimum version, and explain how to install it when missing | 0.5–1 day |
+| `sun-core` URL/format parsing with tests | 1 day |
+| Job subsystem: spawn, stream progress, cancel, clean up child processes | 1.5–2 days |
+| Launcher UI: quality picker, per-download progress, cancel, and error states | 1.5–2 days |
+| Optional integration instead of a hard dependency; documentation and disclosure | 1 day |
+
+Decisions needed before starting:
+
+- **Not bundled.** The installer must stay ~3.4 MB; ffmpeg and yt-dlp remain OmniGet's job.
+- **Configuration, not code.** Prefer calling the CLI; do not compile OmniGet's plugins, which are
+  pinned to their toolchain and would tie Sunny's releases to OmniGet's.
+- **Legal position.** Sunny would pass a URL to a tool the user installed rather than process the
+  video itself, but the repository is public and the feature still accepts YouTube URLs. State this
+  plainly in the README and make the feature opt-in.
+- **Network policy.** Invoking an external tool is not a request from Sunny, so `AGENTS.md` is not
+  technically violated, but its intent shifts. Add an explicit clause covering delegated tools.
 
 ### Blockers for network-backed ideas
 
@@ -161,10 +191,9 @@ anything that needs the network.
 
 - **Internet speed test** — rejected. Needs external servers, careful throughput measurement, and a
   steady-state UI that does not fit a query-driven launcher.
-- **YouTube download with FFMPEG** — rejected. It requires bundling FFMPEG (installer would grow
-  from ~3.4 MB to roughly 80–120 MB, undermining the project's stated size), depends on a
-  constantly breaking extraction tool, and downloading from YouTube conflicts with its terms of
-  service for a public repository.
+- **Bundling YouTube download with FFMPEG in Sunny** — rejected. It would grow the installer from
+  ~3.4 MB to roughly 80–120 MB and tie Sunny to a constantly breaking extractor. Delegating to an
+  external tool (see the OmniGet entry above) is the alternative under consideration.
 
 ## Release v1.0.6 — Quick web search and Lorem ipsum
 
