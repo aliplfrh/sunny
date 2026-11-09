@@ -218,9 +218,9 @@ buy me a coffee — entirely optional, always appreciated.
 
 <div align="center">
 
-<!-- Replace the two links below with your own donation pages. -->
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Sunny-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/YOUR_HANDLE)
-[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/YOUR_HANDLE)
+<!-- Replace the link below with your own donation page. -->
+[![Saweria](https://img.shields.io/badge/Saweria-Support%20Sunny-FFA500?style=for-the-badge&logoColor=white)](https://saweria.co/aliplfrh)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/aliplfrh)
 
 </div>
 
