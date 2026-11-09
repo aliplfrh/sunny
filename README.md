@@ -53,6 +53,12 @@ cd apps/sunny
 npx @tauri-apps/cli@2 build               # NSIS installer in target/release/bundle/nsis
 ```
 
+Or, from the repo root, build + sign + generate `latest.json` in one step:
+
+```powershell
+powershell -File scripts/release.ps1
+```
+
 **Regenerating assets:**
 
 ```sh
