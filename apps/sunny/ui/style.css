@@ -231,6 +231,16 @@ body.blur-ui .backdrop {
   margin-right: 4px;
 }
 
+/* Logo Sunny berwarna putih; di tema terang ia hilang di atas latar terang.
+   brightness(0) membuatnya hitam pekat tanpa perlu aset kedua. */
+body.theme-light .logo,
+body.theme-light .titlebar-logo,
+body.theme-light .hints .hint-icon,
+body.theme-light .settings-tab .tab-ico img,
+body.theme-light .about-card img {
+  filter: brightness(0);
+}
+
 .query {
   flex: 1;
   background: none;

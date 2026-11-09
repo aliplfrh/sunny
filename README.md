@@ -1,98 +1,248 @@
-# Sunny
+<div align="center">
 
-*Sunny* is a fast, lightweight desktop launcher / command palette inspired by [Raycast](https://www.raycast.com/), and a Rust port of [Vicinae](https://github.com/vicinaehq/vicinae) (C++/Qt) core features. Press `Alt+Space` anywhere to summon it. Press `Ctrl+,` for Settings.
+<img src="docs/assets/banner.png" alt="Sunny — a fast, lightweight launcher for Windows" width="100%" />
 
-## Project Status
+<br />
 
-🚧 **Phase 2 — Core Vicinae features** is in progress. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**A fast, lightweight launcher for Windows.** Press <kbd>Alt</kbd>+<kbd>Space</kbd> anywhere.
 
-| Feature | State |
+[![Release](https://img.shields.io/github/v/release/aliplfrh/sunny?style=flat-square&color=f5a623&label=release)](https://github.com/aliplfrh/sunny/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/aliplfrh/sunny/total?style=flat-square&color=f5a623)](https://github.com/aliplfrh/sunny/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-f5a623?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows)](https://github.com/aliplfrh/sunny/releases/latest)
+[![Built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri%20v2-000000?style=flat-square&logo=rust)](https://tauri.app)
+
+[**Download**](https://github.com/aliplfrh/sunny/releases/latest) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Agent guide](AGENTS.md)
+
+</div>
+
+---
+
+Sunny is a command palette for Windows in the spirit of [Raycast](https://www.raycast.com/): one
+keystroke away, keyboard-first, and fast enough that you stop thinking about it. It is a Rust port of
+[Vicinae](https://github.com/vicinaehq/vicinae)'s core ideas — the behaviour is ported, the
+implementation is new.
+
+It is deliberately small: a single ~10 MB executable, no Electron, no background services you did not
+ask for, no account, no telemetry.
+
+<br />
+
+<div align="center">
+  <img src="docs/assets/launcher-search.png" alt="Searching apps and files from the main search field" width="720" />
+  <br />
+  <sub><b>One search field for everything</b> — apps, files, calculations, and commands.</sub>
+</div>
+
+<br />
+
+## Features
+
+### 🔎 One search field for everything
+
+Type and Sunny figures out what you mean. App names, file names, a math expression, or a command —
+all in the same list, ranked by relevance. No modes to remember, no prefixes to learn.
+
+- **Fuzzy app search** across everything in your Start Menu, with real icons
+- **File search built in** — matching files appear directly in the main results
+- **Calculator** — type `12*7` and the answer is the first row; press <kbd>Enter</kbd> to copy it
+- **Commands** — Clipboard History, Emoji Picker, Search Files, Settings
+
+### 📋 Clipboard history
+
+Everything you copy, kept locally and searchable. A master–detail view shows the full content, size,
+timestamp, and checksum before you paste.
+
+- <kbd>Enter</kbd> pastes straight into the window you came from
+- <kbd>Ctrl</kbd>+<kbd>B</kbd> copies without pasting, <kbd>Ctrl</kbd>+<kbd>D</kbd> deletes
+- Pause recording at any time; history is capped and stored on disk
+
+<div align="center">
+  <img src="docs/assets/clipboard-history.png" alt="Clipboard history with preview and metadata" width="720" />
+</div>
+
+### 😀 Emoji picker
+
+Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you picked.
+
+<div align="center">
+  <img src="docs/assets/emoji-picker.png" alt="Emoji picker searching for fire" width="720" />
+</div>
+
+### 🎨 A launcher that looks like it belongs
+
+- **Theme** — System, Light, or Dark, applied to both the launcher and Settings
+- **Background-only opacity** — dim the backdrop without fading your text and icons
+- **Blur** — soften the desktop behind the launcher
+- **Compact or Expanded** window modes
+- **Adjustable font size** and a bundled Inter typeface
+
+<div align="center">
+  <img src="docs/assets/launcher-light.png" alt="Sunny in light theme" width="720" />
+</div>
+
+### ⚙️ A real Settings window
+
+Settings opens as its own window, with a sidebar and a search box — not a cramped panel inside the
+palette. Every change applies live, and is saved atomically so a crash can never wipe your preferences.
+
+<div align="center">
+  <img src="docs/assets/settings.png" alt="Sunny Settings window" width="720" />
+</div>
+
+### 🔄 Updates itself
+
+Sunny checks for a new release, verifies its signature, installs it, and restarts — from
+**Settings → About Sunny**. No manual downloads after the first install.
+
+### ⌨️ Keyboard first
+
+| Action | Shortcut |
 |---|---|
-| App launcher with fuzzy search + real icons | ✅ |
-| Calculator (`12*7` → Enter copies) | ✅ |
-| Emoji picker (`:` prefix, 1,870 emoji) | ✅ |
-| Clipboard history (master–detail, metadata, pause, paste to active window) | ✅ |
-| File search — fuzzy index of your files, open or reveal in Explorer | ✅ |
-| Settings — separate window, tabbed (General, Launcher, Shortcuts, Keyboard, Advanced, About) with search | ✅ |
-| Theme — System / Light / Dark | ✅ |
-| Auto-update — signed releases, in-app check & install | ✅ |
-| System tray icon | ✅ |
-| Window switcher | ⏭️ planned |
-| Linux and Mac Support | ⏭️ planned |
+| Show / hide Sunny | <kbd>Alt</kbd>+<kbd>Space</kbd> |
+| Open Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> |
+| Navigate results | <kbd>↑</kbd> <kbd>↓</kbd> |
+| Open / run / copy | <kbd>Enter</kbd> |
+| Emoji picker | <kbd>:</kbd> |
+| Back to app search | <kbd>Backspace</kbd> |
+| Reveal file in Explorer | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
+| Vim navigation (optional) | <kbd>Ctrl</kbd>+<kbd>J</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> |
 
-## Architecture
+<br />
 
-| Component | Description |
-|---|---|
-| `apps/sunny` | Tauri v2 application — web UI (Raycast-like interface) + Rust backend, global hotkey, tray |
-| `crates/sun-core` | Search engine (fuzzy), ranking, calculator, application index, file index, emoji, clipboard store, settings |
-| `crates/sun-platform` | Windows platform abstraction: global hotkey, window helpers, clipboard sequence, icon extraction, screen capture, paste injection |
+## Install
 
-## Platform
+1. Download **`Sunny_x.y.z_x64-setup.exe`** from the [latest release](https://github.com/aliplfrh/sunny/releases/latest).
+2. Run it. Sunny installs **per-user** — no administrator prompt.
+3. Press <kbd>Alt</kbd>+<kbd>Space</kbd>.
 
-**Windows only for now.** Sunny targets Windows 10/11. Linux and macOS are planned later;
-the `sun-platform` crate keeps the OS-specific code isolated so a port stays possible.
+> **Requirements:** Windows 10 or 11 (x64). WebView2 is already present on current Windows builds.
 
-## Build (Windows)
+<br />
 
-**Prerequisites:**
-1. [Rust](https://rustup.rs) (toolchain `stable-x86_64-pc-windows-msvc`)
-2. [Node.js](https://nodejs.org) ≥ 20
-3. **Microsoft Visual Studio Build Tools** with the *Desktop development with C++* workload (MSVC linker + Windows SDK). For machines without VS: `winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
-4. Run `cargo` from a regular terminal — because Git for Windows' `link.exe` can appear in PATH, this repo uses `.cargo/config.toml` to explicitly select the MSVC linker.
+## Status
 
-**Commands:**
+Sunny is at **v1.0.0** — the core feature set is complete and usable day to day.
 
-```sh
-cargo build --release                    # from the repo root
-target\release\sunny.exe                 # run (Alt+Space to show/hide)
+| | Feature | State |
+|:--:|---|:--:|
+| 🔎 | App launcher with fuzzy search and real icons | ✅ |
+| 📁 | File search, open or reveal in Explorer | ✅ |
+| 🧮 | Calculator | ✅ |
+| 😀 | Emoji picker (1,870 emoji) | ✅ |
+| 📋 | Clipboard history with paste-to-active-window | ✅ |
+| ⚙️ | Separate Settings window with search | ✅ |
+| 🎨 | Theme: System / Light / Dark | ✅ |
+| 🔄 | Signed auto-update | ✅ |
+| 🖥️ | System tray icon | ✅ |
+| 🪟 | Window switcher | 🚧 planned |
+| 🐧 | Linux and macOS builds | 🚧 planned |
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full picture, including what is explicitly out of scope.
+
+<br />
+
+## Build from source
+
+**Prerequisites**
+
+1. [Rust](https://rustup.rs) — `stable-x86_64-pc-windows-msvc`
+2. [Node.js](https://nodejs.org) ≥ 20 (only for the Tauri CLI)
+3. **Visual Studio Build Tools** with the *Desktop development with C++* workload (MSVC linker + Windows SDK)
+
+   ```powershell
+   winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+   ```
+
+**Run it**
+
+```powershell
+cargo build --release
+target\release\sunny.exe
 ```
 
-**Installer:**
+**Build the installer**
 
-```sh
+```powershell
 cd apps/sunny
-npx @tauri-apps/cli@2 build               # NSIS installer in target/release/bundle/nsis
+npx @tauri-apps/cli@2 build        # → target/release/bundle/nsis
 ```
 
-Or, from the repo root, build + sign + generate `latest.json` in one step:
+**Build a signed release** (installer + signature + `latest.json`)
 
 ```powershell
 powershell -File scripts/release.ps1
 ```
 
-**Regenerating assets:**
+**Regenerate assets**
 
-```sh
-powershell -File scripts/make-icon.ps1    # icons/icon.ico + icon.png from the logo pack
-powershell -File scripts/make-emojis.ps1  # emojis.json from the gemoji dataset (MIT)
+```powershell
+powershell -File scripts/make-icon.ps1     # icons from the logo pack
+powershell -File scripts/make-emojis.ps1   # emojis.json from the gemoji dataset (MIT)
 ```
 
-## Releasing & Auto-Update
+> UI files are embedded at compile time — rebuild after editing anything in `apps/sunny/ui/`.
 
-Sunny updates itself through [`tauri-plugin-updater`](https://tauri.app/plugin/updater/). Releases are built and
-signed by `.github/workflows/release.yml`:
+<br />
 
-1. Bump `version` in `apps/sunny/src-tauri/tauri.conf.json` (and `[workspace.package]` in `Cargo.toml`).
-2. Push a tag: `git tag v1.0.1 && git push origin v1.0.1`.
-3. The workflow builds the NSIS installer, signs it with `TAURI_SIGNING_PRIVATE_KEY`, writes
-   `latest.json`, and publishes both to the GitHub release.
+## Architecture
 
-The app polls `https://github.com/aliplfrh/sunny/releases/latest/download/latest.json`; the public key that
-verifies the signature lives in `tauri.conf.json` under `plugins.updater.pubkey`.
+Sunny is three layers, and each one only knows about the layer below it.
 
-**Required repository secrets:**
+```
+apps/sunny/ui          Vanilla HTML/CSS/JS — one bundle, two windows
+        │  Tauri commands
+apps/sunny/src-tauri   Rust: commands, windows, tray, hotkey, background threads
+        │
+crates/sun-core        Pure logic: search, apps, files, clipboard, emoji, calc, settings
+        │
+crates/sun-platform    Windows FFI: icons, screen capture, clipboard, SendInput, ShellExecuteW
+```
 
-| Secret | Value |
+| Crate | Responsibility |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the minisign private key |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Key password (empty if the key has none) |
+| `apps/sunny` | Tauri v2 app — the launcher and Settings windows, global hotkey, tray |
+| `crates/sun-core` | Fuzzy ranking, app index, file index, clipboard store, emoji, calculator, settings |
+| `crates/sun-platform` | All `unsafe` Windows code, isolated behind a safe API |
 
-> Keep the private key backed up. If it is lost, existing installs can no longer verify new updates and
-> users must reinstall manually.
+No frontend framework, no bundler, no TypeScript. The UI is `index.html`, `style.css`, and `main.js`.
+
+<br />
+
+## Contributing
+
+Contributions are welcome — bug reports, fixes, docs, and ideas.
+
+- Read [**CONTRIBUTING.md**](CONTRIBUTING.md) for the process.
+- Read [**AGENTS.md**](AGENTS.md) if you are contributing with an AI agent — it is the architecture
+  contract, and it exists so an agent can be productive without breaking the design.
+
+<br />
+
+## Support the project
+
+Sunny is free, open source, and has no ads, telemetry, or paid tier. If it saves you time, you can
+buy me a coffee — entirely optional, always appreciated.
+
+<div align="center">
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Sunny-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/aliplfrh)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsor-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/aliplfrh)
+
+</div>
+
+Other ways to help that cost nothing: **star the repo**, report bugs, and tell someone about it.
+
+<br />
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Sunny is licensed under **GPL-3.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Sunny is a derivative work of Vicinae, which is licensed under GPL-3.0. All ported code is licensed under GPL-3.0.
+It is a derivative work of [Vicinae](https://github.com/vicinaehq/vicinae), which is also GPL-3.0.
+All ported code remains under GPL-3.0.
+
+<div align="center">
+<br />
+<sub>Built with Rust and Tauri. Not affiliated with Raycast or Vicinae.</sub>
+</div>
