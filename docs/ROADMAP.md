@@ -36,7 +36,7 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
   - [x] Delete selected entry (`Ctrl+D`); copy without pasting (`Ctrl+B`)
   - [ ] Image / file clipboard capture (extension point already modelled via `kind`, `width`, `height`)
 - [x] **Emoji picker** — 1,870 entries generated from gemoji (MIT)
-  - [x] `:` prefix enters emoji mode; search by English name + extra keywords
+  - [x] Search **Emoji** and open its command; no automatic prefix-driven mode changes
   - [x] Enter copies the emoji
 - [x] **Search-only commands** — internal commands (Clipboard History, Emoji Picker, Search Files,
       Settings) are no longer pinned to the default list; they appear only when searched
@@ -64,8 +64,8 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
         opaque); Blur UI (blurs the snapshot); Window mode — **Raycast Compact** /
         **Raycast Expanded**; Show footer hints
   - [x] Shortcuts: read-only reference of every global and in-launcher binding
-  - [x] Keyboard: Vim navigation (`Ctrl+J` / `Ctrl+K`), Backspace-to-app-search toggle,
-        configurable emoji prefix
+  - [x] Keyboard: Vim navigation (`Ctrl+J` / `Ctrl+K`), Backspace-to-app-search toggle;
+        emoji picker is an explicit command (legacy prefix field remains load-compatible)
   - [x] Advanced: open the settings folder, reset all settings, file-index status and rebuild
   - [x] About Sunny: version, license, bundled font, emoji data source, platform,
         **Check for Updates** (signed auto-update via `tauri-plugin-updater`)
@@ -78,6 +78,17 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
   - [x] Release workflow (`.github/workflows/release.yml`) triggered by a `v*` tag
 - [x] **Root file search** — files appear directly in the main search field
       (`include_files`, `file_results`), no need to open the "Search Files" command
+- [x] Root search groups **Results** above **Files**, omits empty groups, and honors a zero file limit
+- [x] Launcher home groups **Favorites** before **Suggestions**, persists favorite order and
+      successful launch counts locally, and ranks suggestions by frequency then recency
+- [x] Settings changes are serialized with error reporting; atomic saves preserve the previous
+      file on failure instead of deleting it or falling back to non-atomic writes
+- [x] Startup reconciles Open at Login with the executable's current path and launches hidden
+      with `--autostart`; Windows Startup apps disables are respected
+- [x] Capture hidden window client rectangles on a background thread after compositor completion;
+      already-open windows only focus, and cancelling a pending show prevents delayed reopens
+- [x] About reads the running binary version, with validated release-label metadata rather than
+      a hardcoded UI version
 - [x] **Clean app icons** — `.lnk` shortcuts are resolved to their target executable before icon
       extraction, so the shortcut-arrow overlay badge is gone
 - [x] **Microsoft Store apps** — AppX/MSIX packages from the AppModel registry are merged into the
@@ -115,6 +126,19 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 - Window switcher
 - Linux and macOS builds (the `sun-platform` abstraction is kept clean so a port stays
   possible; Windows remains the only supported target for now)
+
+## Release v1.0.4 — Launcher UI fixes
+
+- Launcher home shows **Favorites** then **Suggestions**, ranked by successful launch
+  frequency then recency; preferences and counts stay in `launcher-history.json`.
+- Root search groups **Results** above **Files**, hides empty groups, and honors a zero file limit.
+- The Emoji Picker opens only from its command; the legacy prefix no longer changes modes.
+- Opacity and blur use the real client-area capture; Settings no longer floors opacity at 90%.
+- About reads the running binary version instead of a hardcoded label.
+- Open at Login reconciles the current executable path on every start and launches hidden with
+  `--autostart`; a disable in Windows Startup apps is surfaced instead of overridden.
+- Pending window shows are cancellable, so closing during a slow capture cannot reopen a window.
+- Settings saves are serialized and atomic, with native state rolled back on failure.
 
 ## Release v1.0.2.1 — Bug fixes
 

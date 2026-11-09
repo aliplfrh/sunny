@@ -29,6 +29,7 @@
       </header>
       <header class="bar">
         <img class="logo" src="sunny-icon.png" alt="Sunny" draggable="false" />
+        <button class="mode-back" id="modeBack" type="button" title="Back to app search" aria-label="Back to app search" hidden>‹</button>
         <input
           id="query"
           class="query"
@@ -37,7 +38,13 @@
           autocomplete="off"
           spellcheck="false"
           autofocus
+          aria-label="Search Sunny"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="list"
+          aria-expanded="true"
         />
+        <button class="toolbar-actions" id="actionsBtn" type="button" aria-label="App actions" aria-haspopup="menu" aria-controls="actions" aria-expanded="false" title="App actions (Ctrl+K)">⋯</button>
         <select id="clipFilter" class="clip-filter" hidden title="Filter content type">
           <option value="all">All</option>
           <option value="text">Text</option>
@@ -67,6 +74,7 @@
               placeholder="Search settings…"
               autocomplete="off"
               spellcheck="false"
+              aria-label="Search settings"
             />
           </div>
           <nav class="settings-tabs" id="settingsTabs" role="tablist" aria-label="Settings sections"></nav>
@@ -89,11 +97,13 @@
         <aside class="detail" id="detail" hidden></aside>
       </main>
 
+      <div class="launcher-status" id="launcherStatus" role="alert" hidden></div>
+      <div class="action-menu" id="actions" role="menu" aria-label="App actions" hidden></div>
+
       <footer class="hints" id="hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
         <span><kbd>↵</kbd> select</span>
-        <span><kbd>:</kbd> emoji</span>
-        <span><kbd>Alt</kbd>+<kbd>Space</kbd> hide</span>
+        <span><kbd>Ctrl</kbd><kbd>K</kbd> actions</span>
       </footer>
     </div>
     <script src="main.js"></script>

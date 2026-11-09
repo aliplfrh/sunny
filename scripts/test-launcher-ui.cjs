@@ -71,21 +71,35 @@ test("a delayed response from the old query cannot overwrite a reopened launcher
   const start = source.indexOf("async function refresh()");
   const end = source.indexOf("/* ── Aktivasi baris", start);
   assert.ok(start >= 0 && end > start);
-  let resolveOldQuery;
+  let resolveOldSearch;
   context.mode = "apps";
-  context.SETTINGS = { emoji_prefix: ":", include_files: false };
+  context.SETTINGS = { include_files: false, file_results: 8 };
   context.COMMANDS = [];
+  context.closeActions = () => {};
+  context.showLauncherError = () => {};
+  context.refreshHome = () =>
+    Promise.resolve({
+      favorites: [],
+      suggestions: [{ name: "Fresh application", path: "fresh", kind: "app" }],
+    });
   context.invoke = (command) => {
-    if (command === "calc") return new Promise((resolve) => { resolveOldQuery = resolve; });
-    assert.equal(command, "list_apps");
-    return Promise.resolve([{ name: "Fresh application" }]);
+    // The old query is still awaiting its calculator result when the launcher reopens.
+    if (command === "calc") return new Promise((resolve) => { resolveOldSearch = resolve; });
+    if (command === "search_apps") {
+      return Promise.resolve([{ item: { name: "Stale result", path: "stale" }, score: 1 }]);
+    }
+    throw new Error(`unexpected command ${command}`);
   };
   vm.runInNewContext(source.slice(start, end), context);
+
+  context.queryEl.value = "old query";
   const oldSearch = context.refresh();
+  context.queryEl.value = "";
   context.reset();
   await new Promise(setImmediate);
-  resolveOldQuery("old calculator result");
+  resolveOldSearch(null);
   await oldSearch;
+
   assert.equal(context.items.length, 1);
   assert.equal(context.items[0].name, "Fresh application");
   assert.equal(context.queryEl.value, "");

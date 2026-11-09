@@ -5,8 +5,12 @@
 //! diedit manual tidak bisa membuat UI rusak.
 
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_SETTINGS_SAVE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -79,28 +83,72 @@ impl Settings {
         s
     }
 
-    /// Simpan ke disk (best-effort, tidak mengganggu alur UI).
-    /// Ditulis ke file sementara lalu di-rename, supaya crash di tengah tulis
-    /// tidak meninggalkan settings.json setengah jadi (yang akan terbaca
-    /// sebagai default dan membuat setelan pengguna "hilang").
-    pub fn save(&self) {
-        let path = settings_path();
-        if let Some(dir) = path.parent() {
-            let _ = fs::create_dir_all(dir);
+    /// Persist settings atomically, reporting failures without deleting the old file.
+    pub fn save(&self) -> Result<(), String> {
+        self.save_to(settings_path())
+    }
+
+    /// Save to an explicit path without accessing the production settings directory.
+    pub fn save_to(&self, path: impl AsRef<Path>) -> Result<(), String> {
+        self.save_to_with_writer(path.as_ref(), |file, bytes| file.write_all(bytes))
+    }
+
+    // Inject only the write step so tests can simulate partial disk failures safely.
+    fn save_to_with_writer(
+        &self,
+        path: &Path,
+        write: impl FnOnce(&mut fs::File, &[u8]) -> std::io::Result<()>,
+    ) -> Result<(), String> {
+        let filename = path
+            .file_name()
+            .ok_or_else(|| "Choose a valid settings file path.".to_string())?;
+        let bytes = serde_json::to_vec_pretty(self)
+            .map_err(|error| format!("Could not encode settings: {error}"))?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create the settings directory: {error}"))?;
         }
-        let Ok(data) = serde_json::to_vec_pretty(self) else {
-            return;
+
+        // Each writer exclusively creates its own same-directory temporary file.
+        // Retry collisions with stale files without touching another writer's data.
+        let (temporary, mut file) = loop {
+            let mut name = filename.to_os_string();
+            name.push(format!(
+                ".{}.{}.tmp",
+                std::process::id(),
+                NEXT_SETTINGS_SAVE.fetch_add(1, Ordering::Relaxed)
+            ));
+            let temporary = path.with_file_name(name);
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+            {
+                Ok(file) => break (temporary, file),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "Could not create a temporary settings file: {error}"
+                    ));
+                }
+            }
         };
-        let tmp = path.with_extension("json.tmp");
-        if fs::write(&tmp, &data).is_err() {
-            return;
+
+        let result = write(&mut file, &bytes).and_then(|()| file.sync_all());
+        // Close before rename or cleanup, including after partial writes on Windows.
+        drop(file);
+        // Rust's rename atomically replaces an existing file on Windows too.
+        let result = result.and_then(|()| fs::rename(&temporary, path));
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!(
+                "Could not save settings. Your previous settings were kept: {error}"
+            ));
         }
-        // Windows: rename gagal bila target ada, jadi hapus dulu.
-        let _ = fs::remove_file(&path);
-        if fs::rename(&tmp, &path).is_err() {
-            let _ = fs::write(&path, &data);
-            let _ = fs::remove_file(&tmp);
-        }
+        Ok(())
     }
 
     /// Jaga semua nilai dalam rentang yang didukung UI.
@@ -175,6 +223,41 @@ fn settings_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join("opencode");
+            fs::create_dir_all(&root).expect("create isolated test root");
+            loop {
+                let path = root.join(format!(
+                    "sunny-settings-test-{}-{}",
+                    std::process::id(),
+                    NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("create isolated settings test directory: {error}"),
+                }
+            }
+        }
+
+        fn settings_path(&self) -> PathBuf {
+            self.0.join("settings.json")
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn normalizes_hex_colors() {
@@ -208,5 +291,158 @@ mod tests {
         s.accent = "not-a-color".into();
         s.normalize();
         assert_eq!(s.accent, "#f08c28");
+    }
+
+    #[test]
+    fn save_returns_a_result_without_accessing_production_settings() {
+        let _save: fn(&Settings) -> Result<(), String> = Settings::save;
+    }
+
+    #[test]
+    fn save_creates_parent_directories_and_round_trips_the_existing_schema() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("nested").join("settings.json");
+        let settings = Settings {
+            open_at_login: true,
+            opacity: 64,
+            emoji_prefix: "!".into(),
+            ..Settings::default()
+        };
+
+        settings.save_to(&path).expect("save isolated settings");
+
+        let bytes = fs::read(&path).expect("read saved settings");
+        let restored: Settings = serde_json::from_slice(&bytes).expect("decode saved settings");
+        assert_eq!(
+            serde_json::to_value(restored).unwrap(),
+            serde_json::to_value(settings).unwrap()
+        );
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn save_replaces_existing_settings_without_removing_unrelated_temporary_files() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let unrelated = path.with_extension("json.tmp");
+        fs::write(&path, "previous settings").unwrap();
+        fs::write(&unrelated, "another writer's file").unwrap();
+        let settings = Settings::default();
+
+        settings.save_to(&path).expect("replace existing settings");
+
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            serde_json::to_vec_pretty(&settings).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(&unrelated).unwrap(),
+            "another writer's file"
+        );
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn failed_partial_write_preserves_previous_settings_and_cleans_its_temporary_file() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        fs::write(&path, "previous settings").unwrap();
+
+        let error = Settings::default()
+            .save_to_with_writer(&path, |file, bytes| {
+                file.write_all(&bytes[..bytes.len() / 2])?;
+                Err(std::io::Error::other("simulated disk write failure"))
+            })
+            .expect_err("partial writes must fail");
+
+        assert!(error.contains("simulated disk write failure"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "previous settings");
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_replace_preserves_the_destination_and_cleans_its_temporary_file() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        fs::create_dir(&path).unwrap();
+        let marker = path.join("keep.txt");
+        fs::write(&marker, "keep existing destination").unwrap();
+
+        assert!(Settings::default().save_to(&path).is_err());
+
+        assert_eq!(
+            fs::read_to_string(&marker).unwrap(),
+            "keep existing destination"
+        );
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn blocked_parent_returns_an_error_without_changing_existing_files() {
+        let directory = TestDirectory::new();
+        let parent = directory.0.join("not-a-directory");
+        fs::write(&parent, "keep existing parent").unwrap();
+
+        assert!(Settings::default()
+            .save_to(parent.join("settings.json"))
+            .is_err());
+
+        assert_eq!(fs::read_to_string(&parent).unwrap(), "keep existing parent");
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_destination_preserves_previous_settings_and_cleans_its_temporary_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        fs::write(&path, "previous settings").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .expect("lock only the isolated destination");
+
+        let result = Settings::default().save_to(&path);
+        drop(lock);
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "previous settings");
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn concurrent_saves_use_distinct_temporary_files_and_leave_complete_json() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let barrier = std::sync::Barrier::new(8);
+
+        std::thread::scope(|scope| {
+            let mut writers = Vec::new();
+            for opacity in 40..48 {
+                let path = &path;
+                let barrier = &barrier;
+                writers.push(scope.spawn(move || {
+                    let settings = Settings {
+                        opacity,
+                        ..Settings::default()
+                    };
+                    barrier.wait();
+                    settings.save_to(path)
+                }));
+            }
+            for writer in writers {
+                writer
+                    .join()
+                    .expect("writer must not panic")
+                    .expect("save concurrently");
+            }
+        });
+
+        let restored: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!((40..48).contains(&restored.opacity));
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
     }
 }

@@ -7,6 +7,21 @@
 mod win_space;
 pub use win_space::{is_win_space, WinSpaceObserver};
 
+mod autostart;
+pub use autostart::set_autostart;
+
+/// Wait for DWM to finish composing a hide/move before capturing the desktop.
+/// Call only from a background capture thread, never from the window event loop.
+#[cfg(windows)]
+pub fn flush_desktop_compositor() {
+    // SAFETY: DwmFlush has no pointer or handle preconditions; failure merely
+    // leaves capture best-effort (e.g. during a desktop/session transition).
+    let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+}
+
+#[cfg(not(windows))]
+pub fn flush_desktop_compositor() {}
+
 #[cfg(windows)]
 mod windows_imp {
     use std::io::Write;
@@ -534,9 +549,13 @@ fn resolve_logo_variant(base: &std::path::Path) -> Option<std::path::PathBuf> {
 #[cfg(windows)]
 pub fn shell_open(path: &str) -> Result<(), String> {
     use windows::core::{w, PCWSTR};
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    // Launch may run on a worker thread. Shell verb handlers are often COM objects,
+    // so give this thread an apartment; only uninitialize when we initialized it.
+    let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
     let ret = unsafe {
         ShellExecuteW(
             None,
@@ -547,6 +566,9 @@ pub fn shell_open(path: &str) -> Result<(), String> {
             SW_SHOWNORMAL,
         )
     };
+    if initialized {
+        unsafe { CoUninitialize() };
+    }
     if ret.0 as isize > 32 {
         Ok(())
     } else {
@@ -633,34 +655,4 @@ pub fn launch_store_app(_app_id: &str) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn store_app_icon_png(_icon_path: Option<&str>) -> Option<Vec<u8>> {
     None
-}
-
-/// Daftarkan/lepas Sunny di autostart user (`HKCU\...\Run`), tanpa admin.
-#[cfg(windows)]
-pub fn set_autostart(enabled: bool) -> Result<(), String> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = hkcu
-        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
-        .map_err(|e| format!("registry: {e}"))?;
-
-    if enabled {
-        let exe = std::env::current_exe().map_err(|e| format!("exe path: {e}"))?;
-        key.set_value("Sunny", &format!("\"{}\"", exe.display()))
-            .map_err(|e| format!("registry: {e}"))?;
-    } else {
-        match key.delete_value("Sunny") {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("registry: {e}")),
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn set_autostart(_enabled: bool) -> Result<(), String> {
-    Ok(())
 }

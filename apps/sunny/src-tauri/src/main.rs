@@ -4,11 +4,16 @@
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+mod presentation;
+mod version;
+
 /// Toggle window utama: terlihat → sembunyikan; tidak terlihat → tampilkan + fokus input.
 /// (Perbaikan bug: dulu butuh fokus dulu untuk bisa menutup.)
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        if window.is_visible().unwrap_or(false) || app.state::<WindowShows>().launcher.is_pending()
+        {
+            app.state::<WindowShows>().launcher.cancel();
             let _ = window.hide();
         } else {
             show_or_focus_main_window(app);
@@ -20,13 +25,33 @@ fn toggle_main_window(app: &tauri::AppHandle) {
 /// Snapshot desktop diambil SELAGI jendela tersembunyi, sebelum `show`,
 /// sehingga yang tertangkap adalah isi layar di belakang launcher.
 fn show_or_focus_main_window(app: &tauri::AppHandle) {
-    capture_backdrop(app);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
         let _ = window.set_focus();
-        // Memberi tampilan agar langsung meletakkan kursor di search bar
-        let _ = app.emit("sunny:shown", ());
+        return;
     }
+    let Some(ticket) = app.state::<WindowShows>().launcher.begin() else {
+        return;
+    };
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let backdrop = capture_window_backdrop(&handle, "main");
+        let target = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if !target.state::<WindowShows>().launcher.finish(ticket) {
+                return;
+            }
+            *target.state::<BackdropState>().0.lock().unwrap() = backdrop.clone();
+            let _ = target.emit_to("main", "sunny:backdrop", backdrop);
+            if let Some(window) = target.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = target.emit_to("main", "sunny:shown", ());
+            }
+        });
+    });
 }
 
 use std::sync::Mutex;
@@ -36,11 +61,26 @@ use sun_core::settings::Settings;
 /// Cache in-memory daftar aplikasi — menghindari disk IO per-tombol (perf fix).
 pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
 
+/// Serializes the first full scan; other cold requests wait for its result instead
+/// of each rebuilding the Start Menu + Microsoft Store index concurrently.
+/// `AppState` stays empty only while a scan is in progress, so this is the
+/// initialization lock, not a hot-path lock.
+pub struct AppIndexInit(pub Mutex<()>);
+
 /// Preferensi aktif — dimuat saat start, diubah dari panel Settings.
 pub struct SettingsState(pub Mutex<Settings>);
+pub struct SettingsTransactions(pub Mutex<()>);
 
 /// RAII ownership: replacing this value removes the passive keyboard observer.
 pub struct WinSpaceState(pub Mutex<Option<sun_platform::WinSpaceObserver>>);
+
+#[derive(Default)]
+pub struct WindowShows {
+    launcher: presentation::ShowRequest,
+    settings: presentation::ShowRequest,
+}
+
+pub struct LauncherState(pub Mutex<sun_core::launcher::LauncherHistory>);
 
 /// Panel Settings kini jendela terpisah; penanda ini dipertahankan agar
 /// mode Compact/Expanded tidak diterapkan saat setelan dibuka.
@@ -62,28 +102,28 @@ pub struct FileIndexState {
 /// Ambil snapshot layar di posisi jendela (harus dipanggil saat jendela
 /// tersembunyi). Hasilnya dipakai CSS sebagai background launcher sehingga
 /// opacity hanya memudarkan background — teks dan ikon tetap pekat.
-fn capture_backdrop(app: &tauri::AppHandle) {
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
-        return;
-    };
-    let Some(png) =
-        sun_platform::capture_screen_png(pos.x, pos.y, size.width as i32, size.height as i32)
-    else {
-        return;
-    };
+fn capture_window_backdrop(app: &tauri::AppHandle, label: &str) -> Option<String> {
+    let window = app.get_webview_window(label)?;
+    if window.is_visible().unwrap_or(true) {
+        return None;
+    }
+    sun_platform::flush_desktop_compositor();
+    // Tauri's client geometry and GDI coordinates are already physical pixels.
+    // Using outer bounds bakes invisible borders into the CSS background and
+    // shifts/stretches it relative to the WebView, especially on scaled displays.
+    let pos = window.inner_position().ok()?;
+    let size = window.inner_size().ok()?;
+    if size.width == 0 || size.height == 0 {
+        return None;
+    }
+    let width = i32::try_from(size.width).ok()?;
+    let height = i32::try_from(size.height).ok()?;
+    let png = sun_platform::capture_screen_png(pos.x, pos.y, width, height)?;
     use base64::Engine;
-    let url = format!(
+    Some(format!(
         "data:image/png;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(png)
-    );
-    if let Some(state) = app.try_state::<BackdropState>() {
-        *state.0.lock().unwrap() = Some(url.clone());
-    }
-    // Hanya jendela launcher: jendela Settings punya snapshot sendiri.
-    let _ = app.emit_to("main", "sunny:backdrop", url);
+    ))
 }
 
 /// Ubah ukuran jendela sesuai mode (Compact/Expanded) lalu pusatkan kembali.
@@ -125,6 +165,11 @@ fn ping() -> String {
     "pong".into()
 }
 
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> version::VersionInfo {
+    version::VersionInfo::current(&app.package_info().version.to_string())
+}
+
 /// Indeks aplikasi lengkap: shortcut Start Menu + aplikasi Microsoft Store.
 ///
 /// Lapisan platform membaca manifest AppX dan menyediakan isi logo; konversi ke
@@ -143,38 +188,122 @@ fn load_app_index() -> Vec<sun_core::apps::AppEntry> {
     sun_core::apps::merge_store_apps(shortcuts, store)
 }
 
-/// Daftar semua aplikasi terinstal (sumber: cache; fallback scan bila masih kosong).
-#[tauri::command]
-fn list_apps(state: tauri::State<'_, AppState>) -> Vec<sun_core::apps::AppEntry> {
-    let mut apps = state.0.lock().unwrap();
-    if apps.is_empty() {
-        *apps = load_app_index();
+/// Run disk/OS work on a standard background thread without blocking the command loop.
+async fn background<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let (send, mut receive) = tauri::async_runtime::channel(1);
+    std::thread::Builder::new()
+        .name("sunny-command".into())
+        .spawn(move || {
+            let _ = send.blocking_send(work());
+        })
+        .map_err(|e| format!("Cannot start background task: {e}"))?;
+    receive
+        .recv()
+        .await
+        .ok_or_else(|| "Background task stopped unexpectedly".to_string())?
+}
+
+fn app_index(app: &tauri::AppHandle) -> Result<Vec<sun_core::apps::AppEntry>, String> {
+    let state = app.state::<AppState>();
+    if let Ok(current) = state.0.lock() {
+        if !current.is_empty() {
+            return Ok(current.clone());
+        }
     }
-    apps.clone()
+    // One initializer at a time. Re-check after waiting: the previous holder may
+    // already have populated the cache, including on the background warm-up thread.
+    let init = app.state::<AppIndexInit>();
+    let _init_guard = init.0.lock().map_err(|_| "Application index unavailable")?;
+    let mut cache = state
+        .0
+        .lock()
+        .map_err(|_| "Application index unavailable")?;
+    if cache.is_empty() {
+        *cache = load_app_index();
+    }
+    Ok(cache.clone())
+}
+
+/// Application cache, with initial scanning off the UI thread.
+#[tauri::command]
+async fn list_apps(app: tauri::AppHandle) -> Result<Vec<sun_core::apps::AppEntry>, String> {
+    background(move || app_index(&app)).await
 }
 
 /// Pencarian fuzzy terhadap aplikasi (memakai cache, tanpa IO).
 #[tauri::command]
-fn search_apps(
+async fn search_apps(
     query: String,
-    state: tauri::State<'_, AppState>,
-) -> Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>> {
-    let mut apps = state.0.lock().unwrap();
-    if apps.is_empty() {
-        *apps = load_app_index();
-    }
-    sun_core::search::rank(&query, &apps)
+    app: tauri::AppHandle,
+) -> Result<Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>>, String> {
+    background(move || Ok(sun_core::search::rank(&query, &app_index(&app)?))).await
 }
 
-/// Meluncurkan aplikasi lewat shortcut .lnk-nya.
 #[tauri::command]
-fn run_app(path: String) -> Result<(), String> {
-    launching_app(&path)
+async fn launcher_home(app: tauri::AppHandle) -> Result<sun_core::launcher::LauncherHome, String> {
+    background(move || {
+        let apps = app_index(&app)?;
+        let state = app.state::<LauncherState>();
+        let history = state.0.lock().map_err(|_| "Launcher history unavailable")?;
+        Ok(history.home(&apps))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn app_set_favorite(
+    app: tauri::AppHandle,
+    path: String,
+    favorite: bool,
+) -> Result<sun_core::launcher::LauncherHome, String> {
+    background(move || {
+        let apps = app_index(&app)?;
+        if !apps.iter().any(|entry| entry.path == path) {
+            return Err("This application is no longer in the app index".into());
+        }
+        let state = app.state::<LauncherState>();
+        let mut history = state.0.lock().map_err(|_| "Launcher history unavailable")?;
+        history.set_favorite(&path, favorite)?;
+        Ok(history.home(&apps))
+    })
+    .await
+}
+
+/// Count only a successful launch of an indexed application, never a file-search open.
+#[tauri::command]
+async fn run_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    background(move || {
+        let apps = app_index(&app)?;
+        if !apps.iter().any(|entry| entry.path == path) {
+            return Err("This application is no longer in the app index".into());
+        }
+        launching_app(&path)?;
+        // The application is already open; a history write failure must not be
+        // reported as a launch failure (that would invite a duplicate launch).
+        if let Ok(state) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.state::<LauncherState>()
+        })) {
+            if let Ok(mut history) = state.0.lock() {
+                if let Err(error) = history.record_launch(&path) {
+                    let _ = app.emit_to(
+                        "main",
+                        "sunny:launcher-warning",
+                        format!("Application opened, but its usage could not be saved: {error}"),
+                    );
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Tutup (sembunyikan) jendela — dipanggil frontend (tombol Esc).
 #[tauri::command]
 fn hide_main_window(app: tauri::AppHandle) {
+    app.state::<WindowShows>().launcher.cancel();
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -332,57 +461,47 @@ fn reveal_path(path: String) -> Result<(), String> {
     }
 }
 
-/// Ambil snapshot layar di area jendela Settings (harus dipanggil saat
-/// jendela masih tersembunyi) agar opacity/blur bisa dipratinjau di sana.
-fn capture_settings_backdrop(app: &tauri::AppHandle) {
-    let Some(window) = app.get_webview_window("settings") else {
-        return;
-    };
-    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
-        return;
-    };
-    let Some(png) =
-        sun_platform::capture_screen_png(pos.x, pos.y, size.width as i32, size.height as i32)
-    else {
-        return;
-    };
-    use base64::Engine;
-    let url = format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(png)
-    );
-    if let Some(state) = app.try_state::<SettingsBackdropState>() {
-        *state.0.lock().unwrap() = Some(url.clone());
-    }
-    // Event terpisah: jangan menimpa backdrop launcher dengan snapshot area Settings.
-    let _ = app.emit_to("settings", "sunny:settings-backdrop", url);
-}
-
 /// Buka jendela Settings terpisah (ala Raycast) dan sembunyikan launcher.
 #[tauri::command]
 fn settings_open(app: tauri::AppHandle) {
-    // Launcher disembunyikan DULU: kalau snapshot diambil saat launcher masih
-    // tampil, backdrop Settings akan memuat launcher itu sendiri.
+    let Some(settings) = app.get_webview_window("settings") else {
+        return;
+    };
+    app.state::<WindowShows>().launcher.cancel();
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.hide();
     }
-    // Snapshot + show dijalankan di thread terpisah supaya perintah ini tidak
-    // memblokir UI. Jeda 320 ms memberi compositor waktu menggambar ulang
-    // setelah launcher disembunyikan (120 ms masih menyisakan sisa footer).
+    // Never capture Settings into its own backdrop when it is already open.
+    if settings.is_visible().unwrap_or(false) {
+        let _ = settings.unminimize();
+        let _ = settings.set_focus();
+        return;
+    }
+    let Some(ticket) = app.state::<WindowShows>().settings.begin() else {
+        return;
+    };
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(320));
-        capture_settings_backdrop(&app);
-        if let Some(win) = app.get_webview_window("settings") {
-            let _ = win.show();
-            let _ = win.unminimize();
-            let _ = win.set_focus();
-        }
+        let backdrop = capture_window_backdrop(&app, "settings");
+        let target = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if !target.state::<WindowShows>().settings.finish(ticket) {
+                return;
+            }
+            *target.state::<SettingsBackdropState>().0.lock().unwrap() = backdrop.clone();
+            let _ = target.emit_to("settings", "sunny:settings-backdrop", backdrop);
+            if let Some(win) = target.get_webview_window("settings") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        });
     });
 }
 
 /// Tutup jendela Settings (dipanggil dari tombol Esc / back).
 #[tauri::command]
 fn settings_close(app: tauri::AppHandle) {
+    app.state::<WindowShows>().settings.cancel();
     if let Some(win) = app.get_webview_window("settings") {
         let _ = win.hide();
     }
@@ -460,28 +579,8 @@ fn settings_get(state: tauri::State<'_, SettingsState>) -> Settings {
 
 /// Kembalikan semua setelan ke default pabrik lalu simpan.
 #[tauri::command]
-fn settings_reset(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SettingsState>,
-) -> Result<Settings, String> {
-    let current = state.0.lock().unwrap().clone();
-    let mut next = Settings::default();
-    next.normalize();
-
-    replace_hotkey(&app, &current.hotkey, &next.hotkey)?;
-    if next.open_at_login != current.open_at_login {
-        if let Err(error) = sun_platform::set_autostart(next.open_at_login) {
-            let _ = replace_hotkey(&app, &next.hotkey, &current.hotkey);
-            return Err(error);
-        }
-    }
-    apply_tray(&app, next.show_in_tray);
-    apply_window_mode(&app, &next);
-    next.save();
-
-    *state.0.lock().unwrap() = next.clone();
-    let _ = app.emit("sunny:settings-updated", &next);
-    Ok(next)
+async fn settings_reset(app: tauri::AppHandle) -> Result<Settings, String> {
+    background(move || persist_settings(&app, Settings::default())).await
 }
 
 /// Lokasi folder setelan (untuk tombol "Open settings folder").
@@ -566,12 +665,22 @@ fn replace_hotkey(app: &tauri::AppHandle, previous: &str, next: &str) -> Result<
     }
     register_hotkey(app, next)?;
     if sun_platform::is_win_space(previous) {
-        let old = app.state::<WinSpaceState>().0.lock().unwrap().take();
+        let old = app
+            .state::<WinSpaceState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut s| s.take());
         drop(old);
     } else if let Err(error) = app.global_shortcut().unregister(previous) {
         // Do not leave two bindings active when unregistering the previous one fails.
         if sun_platform::is_win_space(next) {
-            let old = app.state::<WinSpaceState>().0.lock().unwrap().take();
+            let old = app
+                .state::<WinSpaceState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|mut s| s.take());
             drop(old);
         } else {
             let _ = app.global_shortcut().unregister(next);
@@ -581,33 +690,56 @@ fn replace_hotkey(app: &tauri::AppHandle, previous: &str, next: &str) -> Result<
     Ok(())
 }
 
+/// Undo a hotkey change, reporting when the old shortcut could not be restored.
+fn restore_hotkey(app: &tauri::AppHandle, previous: &str, applied: &str, error: String) -> String {
+    match replace_hotkey(app, applied, previous) {
+        Ok(()) => error,
+        Err(rollback) => {
+            format!("{error} Your previous shortcut ({previous}) could not be restored: {rollback}")
+        }
+    }
+}
+
 /// Simpan + terapkan seluruh setelan (hotkey, tray, autostart, opacity, mode).
 #[tauri::command]
-fn settings_update(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SettingsState>,
-    settings: Settings,
-) -> Result<Settings, String> {
-    let mut next = settings;
+async fn settings_update(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
+    background(move || persist_settings(&app, settings)).await
+}
+
+fn persist_settings(app: &tauri::AppHandle, mut next: Settings) -> Result<Settings, String> {
+    // Serialize complete transactions across both windows, without holding the
+    // SettingsState lock while native window operations are marshalled to the UI.
+    let transactions = app.state::<SettingsTransactions>();
+    let _transaction = transactions
+        .0
+        .lock()
+        .map_err(|_| "Settings save unavailable")?;
+    let state = app.state::<SettingsState>();
+    let current = state.0.lock().map_err(|_| "Settings unavailable")?.clone();
     next.normalize();
-
-    let current = state.0.lock().unwrap().clone();
-
-    // Hotkey lebih dulu — bila gagal didaftarkan, jangan ubah setelan lain.
-    replace_hotkey(&app, &current.hotkey, &next.hotkey)?;
-
+    replace_hotkey(app, &current.hotkey, &next.hotkey)?;
     if next.open_at_login != current.open_at_login {
         if let Err(error) = sun_platform::set_autostart(next.open_at_login) {
-            let _ = replace_hotkey(&app, &next.hotkey, &current.hotkey);
+            let error = restore_hotkey(app, &current.hotkey, &next.hotkey, error);
+            apply_window_mode(app, &current);
             return Err(error);
         }
     }
-
-    apply_tray(&app, next.show_in_tray);
-    apply_window_mode(&app, &next);
-    next.save();
-
-    *state.0.lock().unwrap() = next.clone();
+    if let Err(error) = next.save() {
+        // Restore native state before reporting; a failed rollback is surfaced too.
+        let mut error = error;
+        if next.open_at_login != current.open_at_login {
+            if let Err(rollback) = sun_platform::set_autostart(current.open_at_login) {
+                error = format!("{error} Open at Login could not be restored: {rollback}");
+            }
+        }
+        let error = restore_hotkey(app, &current.hotkey, &next.hotkey, error);
+        apply_window_mode(app, &current);
+        return Err(error);
+    }
+    *state.0.lock().map_err(|_| "Settings unavailable")? = next.clone();
+    apply_tray(app, next.show_in_tray);
+    apply_window_mode(app, &next);
     let _ = app.emit("sunny:settings-updated", &next);
     Ok(next)
 }
@@ -625,19 +757,31 @@ fn launching_app(path: &str) -> Result<(), String> {
     sun_platform::shell_open(path)
 }
 
+fn is_autostart_launch(arguments: &[String]) -> bool {
+    arguments.iter().any(|argument| argument == "--autostart")
+}
+
 fn main() {
     tauri::Builder::default()
         // Single-instance HARUS plugin pertama: mencegah dua proses menulis
         // settings.json bersamaan (penyebab setelan tampak "tidak tersimpan").
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_or_focus_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !is_autostart_launch(&argv) {
+                show_or_focus_main_window(app);
+            }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState(Mutex::new(Vec::new())))
+        .manage(AppIndexInit(Mutex::new(())))
         .manage(ClipboardStore::new())
         .manage(SettingsState(Mutex::new(Settings::load())))
+        .manage(SettingsTransactions(Mutex::new(())))
+        .manage(LauncherState(Mutex::new(
+            sun_core::launcher::LauncherHistory::load(),
+        )))
         .manage(WinSpaceState(Mutex::new(None)))
+        .manage(WindowShows::default())
         .manage(SettingsUiOpen(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackdropState(Mutex::new(None)))
         .manage(SettingsBackdropState(Mutex::new(None)))
@@ -656,7 +800,10 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             ping,
+            app_version,
             list_apps,
+            launcher_home,
+            app_set_favorite,
             search_apps,
             run_app,
             hide_main_window,
@@ -690,6 +837,12 @@ fn main() {
 
             // ── Setelan aktif (sudah dimuat sebelum window dibuat) ──
             let active = app.state::<SettingsState>().0.lock().unwrap().clone();
+
+            // Saved intent alone does not prove the Run entry exists. Repair a missing
+            // entry or old executable path after install/update on every application start.
+            if let Err(error) = sun_platform::set_autostart(active.open_at_login) {
+                eprintln!("Sunny startup registration: {error}");
+            }
 
             // Hotkey tersimpan; fallback ke default bila gagal (mis. sudah dipakai).
             if register_hotkey(app.handle(), &active.hotkey).is_err() {
@@ -750,6 +903,11 @@ fn main() {
                 let for_event = window.clone();
                 window.on_window_event(move |e| {
                     if matches!(e, tauri::WindowEvent::Focused(false)) {
+                        for_event
+                            .app_handle()
+                            .state::<WindowShows>()
+                            .launcher
+                            .cancel();
                         let _ = for_event.hide();
                     }
                 });
@@ -762,6 +920,11 @@ fn main() {
                 win.on_window_event(move |e| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = e {
                         api.prevent_close();
+                        for_event
+                            .app_handle()
+                            .state::<WindowShows>()
+                            .settings
+                            .cancel();
                         let _ = for_event.hide();
                     }
                 });
@@ -772,15 +935,19 @@ fn main() {
             let handle = app.handle().clone();
             let state_handle = app.handle().clone();
             std::thread::spawn(move || {
-                let new_icons = sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
-                // Isi ulang cache aplikasi (kini ikon asli tersedia)
+                sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
+                // Isi ulang cache aplikasi (kini ikon asli tersedia). Ambil lock inisialisasi
+                // yang sama agar cold-start request tidak memicu scan kedua secara bersamaan.
                 let apps = load_app_index();
-                if let Some(st) = state_handle.try_state::<AppState>() {
-                    *st.0.lock().unwrap() = apps;
+                if let Ok(init) = state_handle.state::<AppIndexInit>().0.lock() {
+                    if let Some(st) = state_handle.try_state::<AppState>() {
+                        if let Ok(mut cache) = st.0.lock() {
+                            *cache = apps;
+                        }
+                    }
+                    drop(init);
                 }
-                if new_icons > 0 {
-                    let _ = handle.emit("sunny:apps-updated", ());
-                }
+                let _ = handle.emit("sunny:apps-updated", ());
             });
 
             // ── Service clipboard history (Fase 2) ──
@@ -833,7 +1000,9 @@ fn main() {
 
             // Jendela memakai `visible: false` di config agar snapshot desktop
             // bisa diambil sebelum tampil. Tampilkan sekarang (sekalian capture).
-            show_or_focus_main_window(app.handle());
+            if !is_autostart_launch(&std::env::args().collect::<Vec<_>>()) {
+                show_or_focus_main_window(app.handle());
+            }
 
             Ok(())
         })
@@ -845,4 +1014,34 @@ fn main() {
                 drop(observer);
             }
         });
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn login_start_is_background_only_and_explicit() {
+        assert!(is_autostart_launch(&[
+            "sunny.exe".into(),
+            "--autostart".into()
+        ]));
+        assert!(!is_autostart_launch(&["sunny.exe".into()]));
+        assert!(!is_autostart_launch(&[
+            "sunny.exe".into(),
+            "--not-autostart".into()
+        ]));
+    }
+
+    #[test]
+    fn background_commands_forward_success_and_failure() {
+        assert_eq!(
+            tauri::async_runtime::block_on(background(|| Ok(42))),
+            Ok(42)
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(background::<()>(|| Err("Disk unavailable".into()))),
+            Err("Disk unavailable".into())
+        );
+    }
 }

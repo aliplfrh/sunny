@@ -22,6 +22,10 @@ const backdropEl = document.getElementById("backdrop");
 const winMinEl = document.getElementById("winMin");
 const winMaxEl = document.getElementById("winMax");
 const winCloseEl = document.getElementById("winClose");
+const modeBackEl = document.getElementById("modeBack");
+const actionsEl = document.getElementById("actions");
+const actionsBtnEl = document.getElementById("actionsBtn");
+const launcherStatusEl = document.getElementById("launcherStatus");
 
 // Satu bundel UI dipakai dua jendela: launcher (`main`) dan Settings
 // (`settings`). Query string membedakan peran keduanya.
@@ -44,7 +48,6 @@ let SETTINGS = {
   blur_ui: false,
   window_mode: "expanded",
   show_footer: true,
-  emoji_prefix: ":",
   backspace_back: true,
   vim_nav: false,
   include_files: true,
@@ -55,20 +58,37 @@ let SETTINGS = {
 let SETTINGS_ERROR = "";
 let saveTimer = null;
 let lastPreviewAt = 0;
+let confirmedSettings = { ...SETTINGS };
+let settingsRevision = 0;
+let settingsBroadcastSeq = 0;
+let pendingSettings = new Map();
+let settingsSavePromise = null;
+let settingsSaveRequested = false;
+let settingsRenderPending = false;
+const settingsSaveErrors = new Map();
 
 let ALL_EMOJI = []; // diisi async saat startup
 invoke("emoji_all").then((data) => {
   ALL_EMOJI = data;
   refresh();
 });
-invoke("settings_get")
+const settingsReady = invoke("settings_get")
   .then((s) => {
-    SETTINGS = s;
-    applyAppearance();
+    // A broadcast received during hydration is newer than the startup snapshot.
+    if (!settingsBroadcastSeq) acceptSettings(s);
+    if (!IS_SETTINGS_WINDOW && mode === "apps") refresh();
   })
-  .catch(() => {});
+  .catch((error) => {
+    SETTINGS_ERROR = `Could not load settings: ${error}`;
+    refreshSettingsView();
+  });
 let items = [];
 let selected = 0;
+let launcherHome = { favorites: [], suggestions: [] };
+let homeSeq = 0;
+let actionsOpen = false;
+let actionSelected = 0;
+let favoriteBusy = false;
 
 // ── State khusus mode clipboard ──
 let paused = false; // watcher pause?
@@ -103,8 +123,10 @@ queryEl.placeholder = MODE_LABEL[mode];
 /* ── Backdrop desktop (untuk opacity background-only) ──── */
 
 function setBackdrop(url) {
-  if (!url) return;
-  backdropEl.style.backgroundImage = `url("${url}")`;
+  if (!backdropEl) return;
+  // Failed captures must clear the previous desktop, not leave a stale image.
+  const valid = typeof url === "string" && /^data:image\/png;base64,[A-Za-z0-9+/=\r\n]+$/.test(url);
+  backdropEl.style.backgroundImage = valid ? `url("${url}")` : "none";
 }
 let backdropFresh = false;
 // Saat start, snapshot mungkin belum selesai diambil → coba beberapa kali.
@@ -114,17 +136,19 @@ function loadBackdrop() {
   const cmd = IS_SETTINGS_WINDOW ? "settings_backdrop_get" : "backdrop_get";
   invoke(cmd)
     .then((url) => {
-      if (url) setBackdrop(url);
-      else if (backdropTries++ < 8) setTimeout(loadBackdrop, 250);
+      setBackdrop(url);
+      if (!url && backdropTries++ < 8) setTimeout(loadBackdrop, 250);
     })
     .catch(() => {});
 }
 loadBackdrop();
 listen("sunny:backdrop", (e) => {
+  if (IS_SETTINGS_WINDOW) return;
   backdropFresh = true;
   setBackdrop(e.payload);
 });
 listen("sunny:settings-backdrop", (e) => {
+  if (!IS_SETTINGS_WINDOW) return;
   setBackdrop(e.payload);
 });
 
@@ -297,8 +321,7 @@ function renderDetail(c) {
   detailEl.append(preview, meta);
 }
 
-/* Footer ala Raycast: kiri = navigasi/emoji, kanan = aksi utama.
-   Petunjuk "hide" dihapus agar baris tetap ringkas. */
+/* Footer labels reflect actual actions; emoji has no implicit entry shortcut. */
 function renderFooter() {
   if (mode === "clip") {
     hintsEl.innerHTML = `
@@ -309,11 +332,11 @@ function renderFooter() {
       <span class="hint-action"><kbd>Ctrl</kbd><kbd>B</kbd> Actions</span>`;
   } else if (mode === "emoji") {
     hintsEl.innerHTML = `
-      <span class="hint-strong"><kbd>:</kbd> Emoji</span>
+      <span class="hint-strong">Emoji Picker</span>
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Copy</span>
       <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>⌫</kbd> Back</span>`;
+      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
   } else if (mode === "files") {
     hintsEl.innerHTML = `
       <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Search Files</span>
@@ -323,15 +346,22 @@ function renderFooter() {
       <span class="hint-action"><kbd>Ctrl</kbd><kbd>R</kbd> Reveal</span>`;
   } else {
     hintsEl.innerHTML = `
-      <span class="hint-strong"><kbd>:</kbd> Emoji</span>
+      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Sunny</span>
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Open</span>
       <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>K</kbd> Actions</span>`;
+      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${items[selected]?.kind === "app" ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
   }
+  hintsEl.querySelector("[data-actions]")?.addEventListener("click", toggleActions);
+  hintsEl.querySelector("[data-back]")?.addEventListener("click", backToApps);
 }
 
 function render() {
+  modeBackEl.hidden = mode === "apps";
+  const canAct = mode === "apps" && items[selected]?.kind === "app";
+  actionsBtnEl.hidden = !canAct;
+  actionsBtnEl.disabled = !canAct;
+  actionsBtnEl.title = `App actions (${SETTINGS.vim_nav ? "Ctrl+Shift+K" : "Ctrl+K"})`;
   const isClip = mode === "clip";
   clipHeadEl.hidden = !isClip;
   clipFilterEl.hidden = !isClip;
@@ -355,14 +385,31 @@ function render() {
           : (fileTotal ? (queryEl.value ? "No matching files or folders." : "Type to search files and folders.")
                        : "No files were found to index."))
       : queryEl.value ? "Nothing matches."
-      : "Sunny is ready. Type an app name, an expression (12*7), ':' for emoji, or search a command.";
+      : "Sunny is ready. Search for an app, a calculation, or a command such as Emoji Picker.";
     listEl.appendChild(div);
   }
 
+  let groupEl = listEl;
+  let groupName = "";
   items.forEach((item, i) => {
+    if (item.group && item.group !== groupName) {
+      groupName = item.group;
+      groupEl = document.createElement("div");
+      groupEl.className = "result-group";
+      groupEl.setAttribute("role", "group");
+      const heading = document.createElement("h2");
+      heading.className = "result-heading";
+      heading.id = `result-group-${i}`;
+      heading.textContent = groupName;
+      groupEl.setAttribute("aria-labelledby", heading.id);
+      groupEl.appendChild(heading);
+      listEl.appendChild(groupEl);
+    }
     const row = document.createElement("div");
     row.className = "item" + (i === selected ? " selected" : "");
     row.setAttribute("role", "option");
+    row.id = `result-${i}`;
+    row.setAttribute("aria-selected", String(i === selected));
 
     row.append(iconElFor(item));
 
@@ -405,17 +452,34 @@ function render() {
     }
 
     row.onclick = () => activate(i);
+    row.oncontextmenu = (e) => {
+      if (item.kind !== "app") return;
+      e.preventDefault();
+      closeActions(false);
+      selected = i;
+      render();
+      toggleActions();
+    };
     row.onmousemove = () => {
+      if (actionsOpen) return;
       if (selected !== i) {
         selected = i;
-        [...listEl.querySelectorAll(".item")].forEach((el, j) =>
-          el.classList.toggle("selected", j === i)
-        );
+        [...listEl.querySelectorAll(".item")].forEach((el, j) => {
+          el.classList.toggle("selected", j === i);
+          el.setAttribute("aria-selected", String(j === i));
+        });
+        queryEl.setAttribute("aria-activedescendant", `result-${i}`);
+        const canAct = mode === "apps" && item.kind === "app";
+        actionsBtnEl.hidden = !canAct;
+        actionsBtnEl.disabled = !canAct;
+        renderFooter();
         if (mode === "clip") renderDetail(items[i]);
       }
     };
-    listEl.appendChild(row);
+    groupEl.appendChild(row);
   });
+  if (items[selected]) queryEl.setAttribute("aria-activedescendant", `result-${selected}`);
+  else queryEl.removeAttribute("aria-activedescendant");
 
   if (isClip) {
     renderDetail(items[selected] || null);
@@ -424,6 +488,95 @@ function render() {
     detailEl.innerHTML = "";
   }
   renderFooter();
+}
+
+/* App actions are shared by the footer, toolbar, context menu, and keyboard. */
+function showLauncherError(error = "") {
+  launcherStatusEl.textContent = error ? String(error) : "";
+  launcherStatusEl.hidden = !error;
+}
+
+function isFavorite(path) {
+  const key = String(path).toLowerCase();
+  return launcherHome.favorites.some((app) => app.path.toLowerCase() === key);
+}
+
+async function refreshHome() {
+  if (IS_SETTINGS_WINDOW || favoriteBusy) return launcherHome;
+  const seq = ++homeSeq;
+  const home = await invoke("launcher_home");
+  if (seq === homeSeq) launcherHome = home;
+  return launcherHome;
+}
+
+function closeActions(restoreFocus = true) {
+  actionsOpen = false;
+  actionsEl.hidden = true;
+  actionsBtnEl.setAttribute("aria-expanded", "false");
+  renderFooter();
+  if (restoreFocus) queryEl.focus();
+}
+
+function focusAction(index) {
+  const buttons = [...actionsEl.querySelectorAll("button")];
+  actionSelected = Math.max(0, Math.min(index, buttons.length - 1));
+  buttons.forEach((button, i) => {
+    button.tabIndex = i === actionSelected ? 0 : -1;
+    button.classList.toggle("selected", i === actionSelected);
+  });
+  buttons[actionSelected]?.focus();
+}
+
+async function setAppFavorite(item) {
+  if (favoriteBusy) return;
+  favoriteBusy = true;
+  ++homeSeq; // Invalidate older home requests before the mutation.
+  showLauncherError();
+  closeActions();
+  try {
+    launcherHome = await invoke("app_set_favorite", { path: item.path, favorite: !isFavorite(item.path) });
+    ++homeSeq;
+    await refresh();
+  } catch (error) {
+    showLauncherError(error);
+  } finally {
+    favoriteBusy = false;
+  }
+}
+
+function toggleActions() {
+  if (actionsOpen) {
+    closeActions();
+    return;
+  }
+  const item = items[selected];
+  if (mode !== "apps" || item?.kind !== "app" || favoriteBusy) return;
+  actionsEl.innerHTML = "";
+  const actions = [
+    ["Open Application", () => { closeActions(); activate(items.indexOf(item)); }],
+    [isFavorite(item.path) ? "Remove from Favorites" : "Add to Favorites", () => setAppFavorite(item)],
+  ];
+  for (const [label, action] of actions) {
+    const button = el("button", "action-item", label);
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.onclick = action;
+    actionsEl.appendChild(button);
+  }
+  actionsOpen = true;
+  actionsEl.hidden = false;
+  actionsBtnEl.setAttribute("aria-expanded", "true");
+  renderFooter();
+  focusAction(0);
+}
+
+function backToApps() {
+  closeActions(false);
+  mode = "apps";
+  queryEl.value = "";
+  queryEl.placeholder = MODE_LABEL.apps;
+  refresh();
+  queryEl.focus();
 }
 
 /* ── Settings: penerapan + panel ───────────────────────── */
@@ -531,6 +684,18 @@ function settingsRow(label, desc, control) {
   if (desc) left.appendChild(el("div", "d", desc));
   const right = el("div", "control");
   right.appendChild(control);
+  const controls = [control, ...control.querySelectorAll("button, input, select")]
+    .filter((node) => ["BUTTON", "INPUT", "SELECT"].includes(node.tagName));
+  controls.forEach((node, i) => {
+    node.dataset.settingsFocus = `${label}-${i}`;
+    if (node.getAttribute("aria-label")) return;
+    const text = node.textContent?.trim();
+    if (node.tagName === "BUTTON" && (text === "+" || text === "−")) {
+      node.setAttribute("aria-label", `${text === "+" ? "Increase" : "Decrease"} ${label}`);
+    } else if (node.tagName !== "BUTTON" || !text) {
+      node.setAttribute("aria-label", label);
+    }
+  });
   row.append(left, right);
   return row;
 }
@@ -932,7 +1097,13 @@ function renderSettingsTabs() {
   }
 }
 
-function renderSettings() {
+function renderSettings(force = false) {
+  const active = document.activeElement;
+  if (!force && (capturingHotkey || (active && settingsBodyEl.contains(active) && ["INPUT", "SELECT"].includes(active.tagName)))) {
+    settingsRenderPending = true;
+    return;
+  }
+  settingsRenderPending = false;
   settingsBodyEl.innerHTML = "";
   hotkeyBtnRef = null;
   renderSettingsTabs();
@@ -1007,7 +1178,7 @@ function renderSettings() {
         ),
         maybeRow(
           "Blur UI",
-          "Blur the desktop backdrop behind the launcher.",
+          "Blur only the desktop snapshot, never text or icons. Visible below 100% opacity.",
           toggleControl(SETTINGS.blur_ui, (v) =>
             onSettingChange({ blur_ui: v }, true)
           )
@@ -1039,7 +1210,7 @@ function renderSettings() {
         ),
         maybeRow(
           "File Results",
-          "How many file matches to mix into the main search.",
+          "How many file matches to show below Results in the main search.",
           stepperControl(SETTINGS.file_results, 0, 30, (v) =>
             onSettingChange({ file_results: v }, true)
           )
@@ -1057,7 +1228,9 @@ function renderSettings() {
       ]),
       settingsSectionFiltered("In the Launcher", [
         maybeRow("Open Settings", "Jump straight to this panel.", textValue("Ctrl + ,")),
-        maybeRow("Emoji Picker", "Type the prefix in the search field.", textValue(SETTINGS.emoji_prefix)),
+        maybeRow("Emoji Picker", "Search for the command, then open it.", textValue("Type “emoji” → Enter")),
+        maybeRow("App Actions / Favorites", "Open app actions to add or remove a favorite. Ctrl+K is also available when Vim navigation is off.", textValue("Ctrl + Shift + K")),
+        maybeRow("Back to App Search", "Leave a command view. Backspace also works when its search field is empty and enabled in Keyboard.", textValue("Esc")),
         maybeRow("Clipboard History", "Search for the command by name.", textValue("Type “clipboard”")),
         maybeRow("Search Files", "Search for the command by name.", textValue("Type “files”")),
         maybeRow("Close Launcher", "Hide the window.", textValue("Esc")),
@@ -1080,16 +1253,9 @@ function renderSettings() {
           onSettingChange({ vim_nav: v }, true)
         )),
         maybeRow("Activate Selection", "Open the highlighted result.", textValue("Enter")),
-        maybeRow("Back to App Search", "Leaves emoji, clipboard, or file mode.", toggleControl(SETTINGS.backspace_back, (v) =>
+        maybeRow("Back to App Search", "Use Backspace in an empty command search to return to apps.", toggleControl(SETTINGS.backspace_back, (v) =>
           onSettingChange({ backspace_back: v }, true)
         )),
-      ]),
-      settingsSectionFiltered("Emoji", [
-        maybeRow(
-          "Emoji Prefix",
-          "Single character that switches the search field to emoji mode.",
-          emojiPrefixControl()
-        ),
       ])
     );
   } else if (settingsTab === "advanced") {
@@ -1130,8 +1296,10 @@ function renderSettings() {
       settingsSectionFiltered("Updates", [
         maybeRow(
           "Version",
-          "Installed Sunny build.",
-          textValue(APP_VERSION)
+            installedVersion && installedVersion.release_tag.replace(/^v/, "") !== installedVersion.version
+              ? `Installed Sunny build. Internal version ${installedVersion.version}.`
+              : "Installed Sunny build.",
+            textValue(installedVersion?.release_tag || versionState)
         ),
         maybeRow(
           "Check for Updates",
@@ -1162,7 +1330,23 @@ function renderSettings() {
 
 /* ── Auto-update (backend: tauri-plugin-updater) ───────── */
 
-const APP_VERSION = "1.0.0";
+// Installed metadata comes from the running binary, never the latest remote release.
+let installedVersion = null;
+let versionState = "Loading…";
+if (IS_SETTINGS_WINDOW) {
+  invoke("app_version")
+    .then((info) => {
+      if (!info || typeof info.version !== "string" || !info.version) throw new Error("Unavailable");
+      installedVersion = {
+        version: info.version,
+        release_tag: typeof info.release_tag === "string" && info.release_tag ? info.release_tag : info.version,
+      };
+    })
+    .catch(() => { versionState = "Unavailable"; })
+    .finally(() => {
+      if (settingsOpen && settingsTab === "about") renderSettings();
+    });
+}
 let updateState = "idle"; // idle | checking | available | downloading | uptodate | error
 let updateInfo = null;
 let updateError = "";
@@ -1265,28 +1449,15 @@ listen("sunny:update-progress", (e) => {
   if (span) span.textContent = `Downloading… ${updateProgress}%`;
 });
 
-function emojiPrefixControl() {
-  const input = document.createElement("input");
-  input.className = "settings-search-input";
-  input.style.width = "64px";
-  input.style.paddingLeft = "10px";
-  input.style.textAlign = "center";
-  input.maxLength = 1;
-  input.value = SETTINGS.emoji_prefix;
-  input.onchange = () => {
-    const v = input.value.trim() || ":";
-    input.value = v;
-    onSettingChange({ emoji_prefix: v }, true);
-  };
-  return input;
-}
-
 async function resetSettings() {
   try {
-    SETTINGS = await invoke("settings_reset");
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await saveSettings();
+    const settings = await invoke("settings_reset");
+    acceptSettings(settings);
     SETTINGS_ERROR = "";
-    applyAppearance();
-    renderSettings();
+    refreshSettingsView();
     flashSaved();
   } catch (err) {
     SETTINGS_ERROR = String(err);
@@ -1340,18 +1511,81 @@ function flashSaved() {
   savedTimer = setTimeout(() => settingsSavedEl.classList.remove("show"), 1200);
 }
 
-async function saveSettings() {
-  try {
-    SETTINGS = await invoke("settings_update", { settings: SETTINGS });
-    SETTINGS_ERROR = "";
-    applyAppearance();
-    flashSaved();
-    return "";
-  } catch (err) {
-    SETTINGS_ERROR = String(err);
-    renderSettings();
-    return SETTINGS_ERROR;
+function rebaseSettings() {
+  SETTINGS = { ...confirmedSettings };
+  for (const [key, patch] of pendingSettings) SETTINGS[key] = patch.value;
+  applyAppearance();
+}
+
+function refreshSettingsView(force = false) {
+  if (!settingsOpen) return;
+  const active = document.activeElement;
+  const editing = active && settingsBodyEl.contains(active) && ["INPUT", "SELECT"].includes(active.tagName);
+  if (!force && (editing || capturingHotkey)) {
+    settingsRenderPending = true;
+    return;
   }
+  const focusKey = active?.dataset?.settingsFocus;
+  const scrollTop = settingsBodyEl.scrollTop;
+  settingsRenderPending = false;
+  renderSettings(force);
+  if (focusKey) {
+    const control = [...settingsBodyEl.querySelectorAll("button, input, select")]
+      .find((node) => node.dataset.settingsFocus === focusKey);
+    control?.focus({ preventScroll: true });
+  }
+  settingsBodyEl.scrollTop = scrollTop;
+}
+
+function acceptSettings(settings) {
+  confirmedSettings = { ...confirmedSettings, ...settings };
+  rebaseSettings();
+  refreshSettingsView();
+}
+
+function saveSettings() {
+  const requestedRevision = settingsRevision;
+  settingsSaveRequested = true;
+  if (!settingsSavePromise) settingsSavePromise = (async () => {
+    // Do not replace still-loading persisted fields with startup defaults.
+    await settingsReady;
+    while (settingsSaveRequested && pendingSettings.size) {
+      settingsSaveRequested = false;
+      const submitted = new Map(pendingSettings);
+      const settings = { ...confirmedSettings };
+      for (const [key, patch] of submitted) settings[key] = patch.value;
+      const broadcastsAtSend = settingsBroadcastSeq;
+      try {
+        const saved = await invoke("settings_update", { settings });
+        if (settingsBroadcastSeq === broadcastsAtSend) {
+          confirmedSettings = { ...confirmedSettings, ...saved };
+        } else {
+          // Preserve unrelated changes received while this write was in flight.
+          for (const key of submitted.keys()) confirmedSettings[key] = saved[key];
+        }
+        for (const [key, patch] of submitted) {
+          if (pendingSettings.get(key)?.revision === patch.revision) pendingSettings.delete(key);
+        }
+        rebaseSettings();
+        SETTINGS_ERROR = "";
+        refreshSettingsView();
+        if (!pendingSettings.size) flashSaved();
+      } catch (error) {
+        // Roll back only this failed revision, leaving newer edits queued.
+        for (const [key, patch] of submitted) {
+          if (pendingSettings.get(key)?.revision === patch.revision) pendingSettings.delete(key);
+        }
+        rebaseSettings();
+        SETTINGS_ERROR = String(error);
+        for (const patch of submitted.values()) settingsSaveErrors.set(patch.revision, SETTINGS_ERROR);
+        // Keep error attribution bounded while overlapping callers finish.
+        while (settingsSaveErrors.size > 32) settingsSaveErrors.delete(settingsSaveErrors.keys().next().value);
+        invoke("settings_preview", { settings: { ...SETTINGS } }).catch(() => {});
+        refreshSettingsView(true);
+      }
+    }
+  })().finally(() => { settingsSavePromise = null; });
+  return settingsSavePromise.then(() => settingsSaveErrors.get(requestedRevision) || "");
 }
 
 /** Simpan segera perubahan yang masih menunggu debounce (mis. saat panel ditutup). */
@@ -1363,15 +1597,17 @@ function flushPendingSave() {
 }
 
 function onSettingChange(patch, immediate = false) {
-  Object.assign(SETTINGS, patch);
+  const revision = ++settingsRevision;
+  for (const [key, value] of Object.entries(patch)) pendingSettings.set(key, { value, revision });
+  rebaseSettings();
   SETTINGS_ERROR = "";
-  applyAppearance();
+  settingsSavedEl.classList.remove("show");
 
   // Preview native (opacity/ukuran jendela) — throttle agar slider tetap ringan.
   const now = performance.now();
   if (immediate || now - lastPreviewAt > 70) {
     lastPreviewAt = now;
-    invoke("settings_preview", { settings: SETTINGS }).catch(() => {});
+    invoke("settings_preview", { settings: { ...SETTINGS } }).catch(() => {});
   }
 
   clearTimeout(saveTimer);
@@ -1401,95 +1637,71 @@ const fuzzy = (needle, hay) => {
 };
 
 async function refresh() {
-  if (settingsOpen) return;
+  if (IS_SETTINGS_WINDOW || settingsOpen) return;
   const seq = ++refreshSeq;
-  const raw = queryEl.value;
-  const q = raw.trim();
+  const q = queryEl.value.trim();
+  const nextItems = [];
+  closeActions(false);
+  showLauncherError();
 
-  // Promosi/demosi mode via awalan emoji (default ":", bisa diubah di Settings)
-  const emojiPrefix = SETTINGS.emoji_prefix || ":";
-  if (mode !== "clip") {
-    if (raw.startsWith(emojiPrefix)) {
-      if (mode !== "emoji") {
-        mode = "emoji";
-        queryEl.placeholder = MODE_LABEL.emoji;
-      }
-    } else if (mode === "emoji") {
-      mode = "apps";
-      queryEl.placeholder = MODE_LABEL.apps;
-    }
-  }
-
-  items = [];
-
-  if (mode === "emoji") {
-    const needle = q.replace(/^[:;.>]+/, "").trim();
-    const pool = ALL_EMOJI.filter(
-      (e) => !needle ||
-        e.name.toLowerCase().includes(needle.toLowerCase()) ||
-        e.keywords.toLowerCase().includes(needle.toLowerCase())
-    ).slice(0, 60);
-    items.push(...pool.map((e) => ({ ...e, kind: "emoji" })));
-  } else if (mode === "clip") {
-    const clips = await invoke("clip_history");
-    if (seq !== refreshSeq) return;
-    clipTotal = clips.length;
-    const typeOK = (c) =>
-      clipType === "all" || (clipType === "text" ? c.kind === "text" : c.kind !== "text");
-    const filtered = clips.filter(
-      (c) =>
-        typeOK(c) &&
-        (!q || String(c.text).toLowerCase().includes(q.toLowerCase()))
-    );
-    items.push(...filtered.slice(0, 200).map((c) => ({
-      ...c,
-      kind: "clip",
-      kind2: c.kind || "text",
-    })));
-  } else if (mode === "files") {
-    const res = await invoke("search_files", { query: q });
-    if (seq !== refreshSeq) return;
-    fileIndexReady = !!res.ready;
-    fileTotal = res.total || 0;
-    items.push(...res.items.map((hit) => ({ ...hit.item, kind: "file" })));
-  } else {
-    // mode apps — hasil kalkulator di urutan pertama bila kueri valid
-    if (q) {
+  try {
+    if (mode === "emoji") {
+      const needle = q.toLowerCase();
+      const pool = ALL_EMOJI.filter(
+        (e) => !needle || e.name.toLowerCase().includes(needle) || e.keywords.toLowerCase().includes(needle)
+      ).slice(0, 60);
+      nextItems.push(...pool.map((e) => ({ ...e, kind: "emoji" })));
+    } else if (mode === "clip") {
+      const clips = await invoke("clip_history");
+      if (seq !== refreshSeq) return;
+      clipTotal = clips.length;
+      const typeOK = (c) => clipType === "all" || (clipType === "text" ? c.kind === "text" : c.kind !== "text");
+      const filtered = clips.filter((c) => typeOK(c) && (!q || String(c.text).toLowerCase().includes(q.toLowerCase())));
+      nextItems.push(...filtered.slice(0, 200).map((c) => ({ ...c, kind: "clip", kind2: c.kind || "text" })));
+    } else if (mode === "files") {
+      const res = await invoke("search_files", { query: q });
+      if (seq !== refreshSeq) return;
+      fileIndexReady = !!res.ready;
+      fileTotal = res.total || 0;
+      nextItems.push(...res.items.map((hit) => ({ ...hit.item, kind: "file" })));
+    } else if (!q) {
+      const home = await refreshHome();
+      if (seq !== refreshSeq) return;
+      nextItems.push(
+        ...home.favorites.map((app) => ({ ...app, kind: "app", group: "Favorites" })),
+        ...home.suggestions.map((app) => ({ ...app, kind: "app", group: "Suggestions" }))
+      );
+    } else {
       const value = await invoke("calc", { query: q });
       if (seq !== refreshSeq) return;
-      if (value != null) items.push({ kind: "calc", expr: q, value });
-    }
-    if (!q) {
-      // Daftar default hanya aplikasi — perintah internal tidak lagi "menempel"
-      // di atas; muncul hanya bila dicari (Rows: "Clipboard History", "Emoji").
-      const apps = await invoke("list_apps");
-      if (seq !== refreshSeq) return;
-      items.push(...apps.map((app) => ({ ...app, kind: "app" })));
-    } else {
+      if (value != null) nextItems.push({ kind: "calc", expr: q, value, group: "Results" });
       const cmds = COMMANDS
         .filter((c) => fuzzy(q, c.keys))
-        .map(({ keys, ...c }) => c);
+        .map(({ keys, ...c }) => ({ ...c, group: "Results" }));
       const str = await invoke("search_apps", { query: q });
       if (seq !== refreshSeq) return;
-      items.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app" })));
+      nextItems.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app", group: "Results" })));
 
-      // File search langsung di pencarian utama (ala Raycast "Include Files in
-      // Root Search"): hasil file digabung di bawah aplikasi, tanpa harus
-      // membuka perintah "Search Files" lebih dulu.
-      if (SETTINGS.include_files && q.length >= 2) {
+      // Headings are presentation only, never entries in the keyboard index.
+      const fileLimit = Math.max(0, Math.min(30, Number(SETTINGS.file_results) || 0));
+      if (SETTINGS.include_files && fileLimit > 0 && q.length >= 2) {
         const res = await invoke("search_files", { query: q });
         if (seq !== refreshSeq) return;
         fileIndexReady = !!res.ready;
         fileTotal = res.total || 0;
         const files = res.items
-          .slice(0, SETTINGS.file_results || 8)
-          .map((hit) => ({ ...hit.item, kind: "file" }));
-        items.push(...files);
+          .slice(0, fileLimit)
+          .map((hit) => ({ ...hit.item, kind: "file", group: "Files" }));
+        nextItems.push(...files);
       }
     }
+  } catch (error) {
+    if (seq !== refreshSeq) return;
+    showLauncherError(error);
   }
 
   if (seq !== refreshSeq) return;
+  items = nextItems;
   selected = 0;
   render();
 }
@@ -1522,8 +1734,12 @@ async function activate(i) {
     invoke("open_path", { path: item.path }).catch(() => {});
     hideWindow();
   } else {
-    invoke("run_app", { path: item.path });
-    hideWindow();
+    try {
+      await invoke("run_app", { path: item.path });
+      hideWindow();
+    } catch (error) {
+      showLauncherError(error);
+    }
   }
 }
 
@@ -1564,19 +1780,27 @@ window.addEventListener("blur", flushPendingSave);
 window.addEventListener("beforeunload", flushPendingSave);
 
 /* ── Data berubah di background → segarkan ─────────────── */
-listen("sunny:apps-updated", () => refresh());
+listen("sunny:apps-updated", async () => {
+  if (IS_SETTINGS_WINDOW) return;
+  try {
+    if (mode !== "apps" || queryEl.value.trim()) await refreshHome();
+    await refresh();
+  } catch (error) {
+    showLauncherError(error);
+  }
+});
 listen("sunny:clip-updated", () => {
   if (mode === "clip") refresh();
 });
 listen("sunny:files-updated", () => {
-  if (mode === "files") refresh();
+  if (mode === "files" || (mode === "apps" && SETTINGS.include_files && queryEl.value.trim())) refresh();
 });
 /* Setelan diubah di jendela Settings → terapkan juga di jendela ini.
    Tanpa ini, tema/opacity baru hanya terlihat setelah restart. */
 listen("sunny:settings-updated", (e) => {
   if (!e.payload) return;
-  Object.assign(SETTINGS, e.payload);
-  applyAppearance();
+  ++settingsBroadcastSeq;
+  acceptSettings(e.payload);
   if (mode === "apps") refresh();
 });
 /* Menu tray → buka panel Settings */
@@ -1588,6 +1812,16 @@ settingsSearchEl.addEventListener("input", () => {
 });
 
 queryEl.addEventListener("input", refresh);
+modeBackEl?.addEventListener("click", backToApps);
+actionsBtnEl?.addEventListener("click", toggleActions);
+document.addEventListener("pointerdown", (e) => {
+  if (actionsOpen && !actionsEl.contains(e.target) && !actionsBtnEl.contains(e.target) && !hintsEl.contains(e.target)) {
+    closeActions(false);
+  }
+});
+document.addEventListener("focusout", () => {
+  if (settingsRenderPending) setTimeout(() => refreshSettingsView(), 0);
+});
 clipFilterEl.addEventListener("change", () => {
   clipType = clipFilterEl.value;
   refresh();
@@ -1615,12 +1849,39 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
+  if (actionsOpen) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const count = actionsEl.querySelectorAll("button").length;
+      focusAction((actionSelected + (e.key === "ArrowDown" ? 1 : count - 1)) % count);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      focusAction(e.key === "Home" ? 0 : actionsEl.querySelectorAll("button").length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      actionsEl.querySelectorAll("button")[actionSelected]?.click();
+    } else if (e.key === "Escape" || e.key === "Tab" || (e.ctrlKey && e.key.toLowerCase() === "k")) {
+      e.preventDefault();
+      closeActions();
+    }
+    return;
+  }
+
   // Ctrl+, → Settings (pintasan ala Raycast).
   if (e.ctrlKey && !e.altKey && (e.key === "," || e.key === "<")) {
     e.preventDefault();
     openSettings();
     return;
   }
+
+  if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "k" && (e.shiftKey || !SETTINGS.vim_nav)) {
+    e.preventDefault();
+    toggleActions();
+    return;
+  }
+
+  // Let native buttons activate normally instead of opening the selected row.
+  if (e.key === "Enter" && e.target?.tagName === "BUTTON") return;
 
   const max = Math.max(items.length - 1, 0);
   // Ctrl+J / Ctrl+K (opsional, Settings → Keyboard → Vim Navigation).
@@ -1643,9 +1904,7 @@ window.addEventListener("keydown", (e) => {
     SETTINGS.backspace_back
   ) {
     e.preventDefault();
-    mode = "apps";
-    queryEl.placeholder = MODE_LABEL.apps;
-    refresh();
+    backToApps();
   } else if (mode === "clip" && e.ctrlKey && e.key.toLowerCase() === "d") {
     // Hapus entri terpilih
     e.preventDefault();
@@ -1674,6 +1933,8 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (IS_SETTINGS_WINDOW) {
       closeSettings();
+    } else if (mode !== "apps") {
+      backToApps();
     } else {
       hideWindow();
     }

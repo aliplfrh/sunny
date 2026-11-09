@@ -44,7 +44,10 @@ Type and Sunny figures out what you mean. App names, file names, a math expressi
 all in the same list, ranked by relevance. No modes to remember, no prefixes to learn.
 
 - **Fuzzy app search** across everything in your Start Menu, with real icons
-- **File search built in** — matching files appear directly in the main results
+- **Grouped search** — apps and commands appear under **Results**, then matching **Files**;
+  when no apps or commands match, Files is the first section
+- **Favorites and Suggestions** — the home view shows pinned apps, then suggestions ranked by
+  how often you successfully launch them; preferences and counts stay on your computer
 - **Calculator** — type `12*7` and the answer is the first row; press <kbd>Enter</kbd> to copy it
 - **Commands** — Clipboard History, Emoji Picker, Search Files, Settings
 
@@ -63,7 +66,8 @@ timestamp, and checksum before you paste.
 
 ### 😀 Emoji picker
 
-Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you picked.
+Search for **Emoji**, open the **Emoji Picker** command, then search 1,870 emoji by name.
+<kbd>Enter</kbd> copies the one you picked. Punctuation in normal searches never opens the picker.
 
 <div align="center">
   <img src="docs/assets/emoji-picker.png" alt="Emoji picker searching for fire" width="720" />
@@ -76,7 +80,7 @@ Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you pic
 - **Microsoft Store apps** — not just Start Menu shortcuts: WhatsApp, Spotify, Netflix and friends
   are searchable and launchable too
 - **Background-only opacity** — dim the backdrop without fading your text and icons
-- **Blur** — soften the desktop behind the launcher
+- **Blur** — soften the captured desktop behind the launcher without blurring text or icons
 - **Compact or Expanded** window modes
 - **Adjustable font size** and a bundled Inter typeface
 
@@ -84,6 +88,9 @@ Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you pic
 
 Settings opens as its own window, with a sidebar and a search box — not a cramped panel inside the
 palette. Every change applies live, and is saved atomically so a crash can never wipe your preferences.
+About Sunny reads the running build version, including a separate release label when applicable.
+**Open at Login** repairs missing startup registration when Sunny starts; login launches stay
+in the background. A manual disable in Windows Startup apps is never silently overridden.
 
 ### 🔄 Updates itself
 
@@ -95,7 +102,7 @@ Sunny checks for a new release, verifies its signature, installs it, and restart
 Choose **Win + Space** in Settings → General → Sunny Hotkey to open Sunny after
 releasing the combination. It is observed without blocking or replacing any keys;
 Windows may also switch input languages. Other shortcuts still use native registration.
-Reopening Sunny clears the previous search and returns to the application list.
+Reopening Sunny clears the previous search and returns to Favorites and Suggestions.
 
 | Action | Shortcut |
 |---|---|
@@ -103,7 +110,7 @@ Reopening Sunny clears the previous search and returns to the application list.
 | Open Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> |
 | Navigate results | <kbd>↑</kbd> <kbd>↓</kbd> |
 | Open / run / copy | <kbd>Enter</kbd> |
-| Emoji picker | <kbd>:</kbd> |
+| Emoji picker | Search **Emoji**, then <kbd>Enter</kbd> |
 | Back to app search | <kbd>Backspace</kbd> |
 | Reveal file in Explorer | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
 | Vim navigation (optional) | <kbd>Ctrl</kbd>+<kbd>J</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> |
@@ -122,11 +129,13 @@ Reopening Sunny clears the previous search and returns to the application list.
 
 ## Status
 
-Sunny is at **v1.0.0** — the core feature set is complete and usable day to day.
+See the [latest release](https://github.com/aliplfrh/sunny/releases/latest) for the published
+version. About Sunny displays the version of the binary you are actually running.
 
 | | Feature | State |
 |:--:|---|:--:|
 | 🔎 | App launcher with fuzzy search and real icons | ✅ |
+| ⭐ | Persistent Favorites and usage-ranked Suggestions | ✅ |
 | 🏪 | Microsoft Store apps (WhatsApp, Spotify, …) | ✅ |
 | 📁 | File search, open or reveal in Explorer | ✅ |
 | 🧮 | Calculator | ✅ |
