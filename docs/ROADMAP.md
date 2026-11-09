@@ -166,6 +166,16 @@ anything that needs the network.
   constantly breaking extraction tool, and downloading from YouTube conflicts with its terms of
   service for a public repository.
 
+## Release v1.0.6 — Quick web search and Lorem ipsum
+
+- **Quick web search** — end a query with `?` (or start it with one) to search the web instead of
+  the local index, for example `rust ownership?`. Choose the engine in **Settings → Launcher →
+  Quick Web Search**; Google, DuckDuckGo, Bing, YouTube, GitHub, Stack Overflow, and Wikipedia are
+  included. Sunny builds the URL and hands it to your browser, so the app itself makes no request.
+- **Lorem ipsum** — `lorem`, `lorem 5 sentences`, `lorem 3 paragraphs`, or `lorem 20 words`
+  produces text you can copy with <kbd>Enter</kbd>. Deterministic and bounded, so a large request
+  cannot stall the launcher.
+
 ## Release v1.0.5 — Search Files command
 
 - With **Include Files in Root Search** enabled, the **Search Files** command no longer appears

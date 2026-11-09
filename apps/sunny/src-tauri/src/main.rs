@@ -315,6 +315,38 @@ fn calc(query: String) -> Option<String> {
     sun_core::calc::evaluate(&query)
 }
 
+/// Lorem ipsum text (None bila kueri bukan permintaan lorem).
+#[tauri::command]
+fn lorem(query: String) -> Option<String> {
+    sun_core::lorem::evaluate(&query)
+}
+
+/// Mesin pencari yang tersedia untuk Quick Web Search.
+#[tauri::command]
+fn search_engines() -> Vec<sun_core::websearch::SearchEngine> {
+    sun_core::websearch::default_engines()
+}
+
+/// Buka hasil Quick Web Search di browser default.
+///
+/// Sunny sendiri tidak melakukan permintaan jaringan: URL dirender di sini lalu
+/// dibuka lewat handler default Windows, jadi mesin pencari yang dihubungi.
+#[tauri::command]
+fn web_search(query: String, engine_id: String) -> Result<String, String> {
+    let engine = sun_core::websearch::engine_by_id(&engine_id);
+    let (_, url) = sun_core::websearch::prepare(&query, &engine).map_err(|reason| match reason {
+        sun_core::websearch::NotASearch::MissingQuestionMark => {
+            "Add ? to the end of the query to search the web.".to_string()
+        }
+        sun_core::websearch::NotASearch::EmptyQuery => "Type something to search for.".to_string(),
+        sun_core::websearch::NotASearch::TooShort => {
+            "Type at least two characters to search for.".to_string()
+        }
+    })?;
+    sun_platform::shell_open(&url)?;
+    Ok(url)
+}
+
 /// Salin teks ke clipboard (fallback bila JS clipboard API gagal).
 #[tauri::command]
 fn copy_to_clipboard(text: String) -> Result<(), String> {
@@ -808,6 +840,9 @@ fn main() {
             run_app,
             hide_main_window,
             calc,
+            lorem,
+            search_engines,
+            web_search,
             copy_to_clipboard,
             clip_history,
             clip_pause_state,

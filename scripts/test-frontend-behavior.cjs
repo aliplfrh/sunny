@@ -509,3 +509,61 @@ test("file result count is labelled in files, not pixels", async () => {
   assert.match(source, /function stepperControl\(start, min, max, onChange, unit = "px"\)/);
   assert.match(source, /stepperControl\(SETTINGS\.file_results[\s\S]{0,160}?"files"/);
 });
+
+test("lorem queries become a copyable result and other queries do not", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [],
+    lorem: (args) => (/^lorem/i.test(args.query) ? "Lorem ipsum dolor sit amet." : null),
+  } });
+
+  await f.search("lorem 2 sentences");
+  assert.equal(f.run('items.filter((i) => i.kind === "lorem").length'), 1);
+  assert.equal(f.run('items.find((i) => i.kind === "lorem").text'), "Lorem ipsum dolor sit amet.");
+  assert.deepEqual(f.headings(), ["Results"]);
+
+  await f.search("photoshop");
+  assert.equal(f.run('items.filter((i) => i.kind === "lorem").length'), 0);
+});
+
+test("a trailing question mark offers a web search in the configured engine", async () => {
+  const f = await fixture({ settings: { search_engine: "duckduckgo" }, responses: {
+    search_apps: [],
+    search_engines: [
+      { id: "google", name: "Google", template: "https://www.google.com/search?q={query}", suffix: "" },
+      { id: "duckduckgo", name: "DuckDuckGo", template: "https://duckduckgo.com/?q={query}", suffix: "" },
+    ],
+  } });
+
+  await f.search("rust ownership?");
+  const web = f.run('items.find((i) => i.kind === "web")');
+  assert.ok(web, "a web search row should be offered");
+  assert.equal(web.engine, "duckduckgo");
+  assert.equal(web.text, "rust ownership");
+
+  // A leading question mark works too.
+  await f.search("?rust ownership");
+  assert.equal(f.run('items.find((i) => i.kind === "web").text'), "rust ownership");
+
+  // Without the marker there is no web row.
+  await f.search("rust ownership");
+  assert.equal(f.run('items.filter((i) => i.kind === "web").length'), 0);
+
+  // A bare marker is not a search.
+  await f.search("?");
+  assert.equal(f.run('items.filter((i) => i.kind === "web").length'), 0);
+});
+
+test("activating a web result opens the browser through the backend", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [],
+    web_search: "https://www.google.com/search?q=rust%20ownership",
+  } });
+  await f.search("rust ownership?");
+  const index = f.run('items.findIndex((i) => i.kind === "web")');
+  assert.ok(index >= 0);
+  await f.run(`activate(${index})`);
+  await f.settle();
+  const call = f.calls.filter((c) => c.command === "web_search").pop();
+  assert.equal(call.args.query, "rust ownership");
+  assert.equal(call.args.engineId, "google");
+});

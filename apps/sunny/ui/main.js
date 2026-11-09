@@ -120,6 +120,31 @@ const MODE_LABEL = {
 };
 queryEl.placeholder = MODE_LABEL[mode];
 
+/* ── Quick Web Search ──────────────────────────────────── */
+
+// Engine list comes from the backend so Settings and the launcher cannot drift.
+// A local fallback keeps `?` working during startup, before the call resolves.
+const FALLBACK_ENGINES = [
+  { id: "google", name: "Google", template: "https://www.google.com/search?q={query}" },
+];
+let SEARCH_ENGINES = [];
+
+invoke("search_engines")
+  .then((engines) => {
+    if (Array.isArray(engines) && engines.length) SEARCH_ENGINES = engines;
+  })
+  .catch(() => {});
+
+function engineList() {
+  return SEARCH_ENGINES.length ? SEARCH_ENGINES : FALLBACK_ENGINES;
+}
+
+function currentEngine() {
+  const id = SETTINGS.search_engine || "google";
+  const list = engineList();
+  return list.find((engine) => engine.id === id) || list[0] || null;
+}
+
 /* ── Backdrop desktop (untuk opacity background-only) ──── */
 
 function setBackdrop(url) {
@@ -242,6 +267,12 @@ function parentDir(path) {
   return dir;
 }
 
+/** One-line preview of generated lorem text; full text is copied on Enter. */
+function loremPreview(text) {
+  const flat = String(text).replace(/\s+/g, " ").trim();
+  return flat.length > 96 ? flat.slice(0, 96).trimEnd() + "…" : flat;
+}
+
 function iconElFor(item) {
   const icon = document.createElement("div");
   icon.className = "icon";
@@ -259,6 +290,12 @@ function iconElFor(item) {
   } else if (item.kind === "file") {
     icon.classList.add("file");
     icon.textContent = fileGlyph(item);
+  } else if (item.kind === "lorem") {
+    icon.classList.add("calc");
+    icon.textContent = "¶";
+  } else if (item.kind === "web") {
+    icon.classList.add("calc");
+    icon.textContent = "🔎";
   } else if (item.icon) {
     const img = document.createElement("img");
     img.src = item.icon;
@@ -417,6 +454,10 @@ function render() {
     name.className = "name";
     if (item.kind === "calc") {
       name.innerHTML = `${escapeHtml(item.expr)} <b class="val">= ${escapeHtml(item.value)}</b>`;
+    } else if (item.kind === "lorem") {
+      name.textContent = loremPreview(item.text);
+    } else if (item.kind === "web") {
+      name.textContent = `Search ${item.engineName} for “${item.text}”`;
     } else if (item.kind === "clip") {
       name.className += " clip";
       name.textContent = clipTitle(item);
@@ -445,6 +486,8 @@ function render() {
       const sub = document.createElement("div");
       sub.className = "sub";
       if (item.kind === "calc") sub.textContent = "Enter: copy";
+      else if (item.kind === "lorem") sub.textContent = "Enter: copy";
+      else if (item.kind === "web") sub.textContent = "Enter: open in browser";
       else if (item.kind === "emoji") sub.textContent = "Enter: copy";
       else if (item.kind === "cmd") sub.textContent = "Enter: open";
       else sub.textContent = item.category || "Application";
@@ -723,6 +766,21 @@ function fontControl() {
   }
   sel.value = SETTINGS.font;
   sel.onchange = () => onSettingChange({ font: sel.value }, true);
+  return sel;
+}
+
+/** Engine picker for Quick Web Search; falls back to a plain value if the
+    backend list has not arrived yet. */
+function searchEngineControl() {
+  const sel = el("select", "select");
+  const list = engineList();
+  for (const engine of list) {
+    const option = el("option", null, engine.name);
+    option.value = engine.id;
+    sel.appendChild(option);
+  }
+  sel.value = SETTINGS.search_engine || "google";
+  sel.onchange = () => onSettingChange({ search_engine: sel.value }, true);
   return sel;
 }
 
@@ -1215,6 +1273,11 @@ function renderSettings(force = false) {
             onSettingChange({ file_results: v }, true), "files"
           )
         ),
+        maybeRow(
+          "Quick Web Search",
+          "End a query with ? to search the web, for example “rust ownership?”.",
+          searchEngineControl()
+        ),
       ])
     );
   } else if (settingsTab === "shortcuts") {
@@ -1686,6 +1749,27 @@ async function refresh() {
       const value = await invoke("calc", { query: q });
       if (seq !== refreshSeq) return;
       if (value != null) nextItems.push({ kind: "calc", expr: q, value, group: "Results" });
+
+      const text = await invoke("lorem", { query: q });
+      if (seq !== refreshSeq) return;
+      if (text != null) nextItems.push({ kind: "lorem", expr: q, text, group: "Results" });
+
+      // A trailing `?` makes this a web search instead of a local lookup.
+      const marked = q.endsWith("?") || q.startsWith("?");
+      if (marked) {
+        const engine = currentEngine();
+        const searchText = q.replace(/^\?+|\?+$/g, "").trim();
+        if (engine && searchText.length >= 2) {
+          nextItems.push({
+            kind: "web",
+            group: "Results",
+            engine: engine.id,
+            engineName: engine.name,
+            text: searchText,
+          });
+        }
+      }
+
       const cmds = COMMANDS
         .filter((c) => fuzzy(q, c.keys))
         .filter((c) => c.cmd !== "files" || filesCommandVisible(q))
@@ -1727,6 +1811,18 @@ async function activate(i) {
     const value = item.value;
     await navigator.clipboard?.writeText(value).catch(() => invoke("copy_to_clipboard", { text: value }));
     hideWindow();
+  } else if (item.kind === "lorem") {
+    const text = item.text;
+    const copied = await navigator.clipboard?.writeText(text).then(() => true).catch(() => false);
+    if (!copied) invoke("copy_to_clipboard", { text }).catch(() => {});
+    hideWindow();
+  } else if (item.kind === "web") {
+    try {
+      await invoke("web_search", { query: item.text, engineId: item.engine });
+      hideWindow();
+    } catch (error) {
+      showLauncherError(error);
+    }
   } else if (item.kind === "cmd") {
     if (item.cmd === "settings") {
       openSettings();

@@ -47,6 +47,8 @@ pub struct Settings {
     pub theme: String,
     /// Warna aksen (hex `#rrggbb`) untuk sorotan, tombol aktif, dan switch.
     pub accent: String,
+    /// Mesin pencari default untuk "Quick Web Search" (kueri berakhiran `?`).
+    pub search_engine: String,
 }
 
 impl Default for Settings {
@@ -68,6 +70,7 @@ impl Default for Settings {
             file_results: 8,
             theme: "system".into(),
             accent: "#f08c28".into(),
+            search_engine: "google".into(),
         }
     }
 }
@@ -177,6 +180,10 @@ impl Settings {
         }
         // Aksen harus hex #rrggbb yang valid; kalau tidak, kembali ke oranye Sunny.
         self.accent = normalize_hex_color(&self.accent).unwrap_or_else(|| "#f08c28".into());
+        // Mesin pencari tak dikenal kembali ke Google, supaya kueri `?` tetap jalan.
+        if crate::websearch::engine_by_id(&self.search_engine).id != self.search_engine {
+            self.search_engine = "google".into();
+        }
     }
 
     /// Tinggi jendela (logical px) untuk mode yang aktif.
@@ -444,5 +451,30 @@ mod tests {
         let restored: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert!((40..48).contains(&restored.opacity));
         assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod search_engine_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_search_engine_falls_back_to_google() {
+        let mut s = Settings { search_engine: "not-real".into(), ..Default::default() };
+        s.normalize();
+        assert_eq!(s.search_engine, "google");
+    }
+
+    #[test]
+    fn known_search_engine_is_preserved() {
+        let mut s = Settings { search_engine: "duckduckgo".into(), ..Default::default() };
+        s.normalize();
+        assert_eq!(s.search_engine, "duckduckgo");
+    }
+
+    #[test]
+    fn legacy_settings_without_the_field_still_load() {
+        let s: Settings = serde_json::from_str(r#"{"hotkey":"Ctrl+Space"}"#).unwrap();
+        assert_eq!(s.search_engine, "google");
     }
 }
