@@ -32,10 +32,12 @@ try {
 }
 
 $bundleDir = Join-Path $root "target\release\bundle\nsis"
-$setup = Get-ChildItem $bundleDir -Filter "*-setup.exe" | Select-Object -First 1
-if (-not $setup) { throw "NSIS installer not found in $bundleDir" }
-$sig = Get-ChildItem $bundleDir -Filter "*-setup.exe.sig" | Select-Object -First 1
-if (-not $sig) { throw "Updater signature not found — createUpdaterArtifacts must be true" }
+# Pilih installer untuk versi ini saja: folder bundle menyimpan artefak versi
+# lama, dan `Select-Object -First 1` bisa mengambil yang salah.
+$setup = Get-ChildItem $bundleDir -Filter "Sunny_${version}_*-setup.exe" | Select-Object -First 1
+if (-not $setup) { throw "NSIS installer for $version not found in $bundleDir" }
+$sig = Get-Item "$($setup.FullName).sig" -ErrorAction SilentlyContinue
+if (-not $sig) { throw "Updater signature not found - createUpdaterArtifacts must be true" }
 
 $signature = (Get-Content $sig.FullName -Raw).Trim()
 $manifest = [ordered]@{
