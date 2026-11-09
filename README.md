@@ -23,15 +23,25 @@ keystroke away, keyboard-first, and fast enough that you stop thinking about it.
 [Vicinae](https://github.com/vicinaehq/vicinae)'s core ideas — the behaviour is ported, the
 implementation is new.
 
-It is deliberately small: a single ~10 MB executable, no Electron, no background services you did not
-ask for, no account, no telemetry.
+The executable is 10.5 MB: no Electron runtime bundled, no account, no telemetry. It renders through
+the WebView2 already installed on Windows, so it costs a host process plus WebView2 helpers at
+runtime rather than shipping its own browser engine — see [Memory footprint](#memory-footprint)
+for the real numbers.
 
 <br />
 
 <div align="center">
-  <img src="docs/assets/launcher-search.png" alt="Searching apps and files from the main search field" width="720" />
+  <img src="docs/assets/launcher-home.png" alt="Sunny's home view: Favorites above Suggestions ranked by usage" width="720" />
   <br />
-  <sub><b>One search field for everything</b> — apps, files, calculations, and commands.</sub>
+  <sub><b>Favorites and Suggestions</b> — pinned apps first, then what you actually launch.</sub>
+</div>
+
+<br />
+
+<div align="center">
+  <img src="docs/assets/launcher-search.png" alt="Results grouped above Files when searching for Valorant" width="720" />
+  <br />
+  <sub><b>Grouped search</b> — Results always above Files, and Files-only when nothing else matches.</sub>
 </div>
 
 <br />
@@ -49,7 +59,9 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
 - **Favorites and Suggestions** — the home view shows pinned apps, then suggestions ranked by
   how often you successfully launch them; preferences and counts stay on your computer
 - **Calculator** — type `12*7` and the answer is the first row; press <kbd>Enter</kbd> to copy it
-- **Commands** — Clipboard History, Emoji Picker, Search Files, Settings
+- **Commands** — Clipboard History, Emoji Picker, Search Files, Settings. Each command appears
+  only when you search for it; **Search Files** additionally stays hidden while
+  *Include Files in Root Search* already covers it
 
 ### 📋 Clipboard history
 
@@ -62,12 +74,15 @@ timestamp, and checksum before you paste.
 
 <div align="center">
   <img src="docs/assets/clipboard-history.png" alt="Clipboard history with preview and metadata" width="720" />
+  <br />
+  <sub>Search "Clipboard" and open the command. Sample entries shown.</sub>
 </div>
 
 ### 😀 Emoji picker
 
-Search for **Emoji**, open the **Emoji Picker** command, then search 1,870 emoji by name.
-<kbd>Enter</kbd> copies the one you picked. Punctuation in normal searches never opens the picker.
+Search for **Emoji**, open the **Emoji Picker**, then search 1,870 emoji by name.
+<kbd>Enter</kbd> copies the one you picked. Typing `:` in a normal search does nothing special —
+the picker is a command you choose, not a hidden mode.
 
 <div align="center">
   <img src="docs/assets/emoji-picker.png" alt="Emoji picker searching for fire" width="720" />
@@ -150,6 +165,48 @@ version. About Sunny displays the version of the binary you are actually running
 | 🐧 | Linux and macOS builds | 🚧 planned |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full picture, including what is explicitly out of scope.
+
+<br />
+
+## Memory footprint
+
+Sunny is small on disk, but it is honest to say it is **not** the smallest thing in RAM. The
+executable is 10.5 MB, yet it renders through WebView2, so at runtime you own a host process plus
+its Chromium helper processes.
+
+Measured with **private working set** — the number Task Manager shows in its *Memory* column — on
+Windows 11 x64, Sunny 1.0.5 freshly launched and idle, five samples:
+
+| | Process count | Memory (private working set) |
+|---|:--:|---|
+| `sunny.exe` alone (what one Task Manager row shows) | 1 | **11.3 MB** |
+| Sunny, full process tree (host + WebView2 helpers) | 8 | **114.6 MB** |
+
+The single row is misleading. If you collapse Sunny in Task Manager you are only looking at the
+Rust host; the seven `msedgewebview2.exe` children hold the rest.
+
+### Compared with Raycast
+
+| Launcher | Processes | Memory (Task Manager *Memory* column) |
+|---|:--:|---|
+| **Sunny** (full tree) | 8 | **114.6 MB** |
+| Raycast (expanded row) | 10 | 341.9 MB |
+
+Both readings are from Task Manager on the same machine; Raycast was already running and reported
+341.9 MB across its 10 processes. On this comparison Sunny uses roughly **a third** of Raycast's
+memory.
+
+A fair caveat: I measured Sunny directly and sampled five times, but the Raycast figure is the total
+its own Task Manager row reported in that session rather than a controlled re-run here. Treat it as
+a same-machine observation, not a benchmark. Raycast may cache more, keep more extensions warm, or
+behave differently after a fresh start.
+
+### Why it is not lower
+
+Electron-style runtimes share one constraint: the UI is HTML. Sunny avoids bundling a browser
+engine — it uses the WebView2 that already ships with Windows — which is why the download is
+10.5 MB instead of ~100 MB. Avoiding a bundled engine does not remove the cost of having *a*
+engine, only the duplication.
 
 <br />
 
