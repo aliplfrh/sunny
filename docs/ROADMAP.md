@@ -22,7 +22,7 @@ Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
 - [x] Application launching (proper process spawning)
 - [x] System tray icon (left-click toggle, menu Show/Quit)
 - [x] Release build: ~6 MB binary, ~28 MB RAM
-- [ ] Run at startup (optional)
+- [x] Run at startup (Settings → Open at Login)
 
 ## Phase 2 — Core Vicinae Features 🚧
 - [x] **Clipboard history** — polling watcher (`GetClipboardSequenceNumber`, 400 ms), no hooks
@@ -41,6 +41,13 @@ Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
 - [x] **Search-only commands** — internal commands (Clipboard History, Emoji Picker) are no longer
       pinned to the default list; they appear only when searched
 - [x] **Branding** — Sunny logo pack wired in: multi-size `.ico` (app icon), custom tray icon, UI logo
+- [x] **Settings** (Raycast/Sonora-inspired), persisted to `%LOCALAPPDATA%\Sunny\settings.json`
+  - [x] General: Open at Login (`HKCU\...\Run`), Show in System Tray, Sunny Hotkey
+        (click-to-capture, requires a modifier, re-registers the global shortcut)
+  - [x] Appearance: Font — **Sonora (Inter)** default or System; Font size 12–20 px
+  - [x] Window: Opacity 40–100 % (native layered window), Blur UI (in-page frosted layer),
+        Window mode — **Raycast Compact** / **Raycast Expanded**
+  - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
 - [ ] Text expander / snippet — *intentionally dropped (out of scope for this phase)*
 - [ ] File search (fast index like Everything/ripgrep)
 - [ ] Window switcher

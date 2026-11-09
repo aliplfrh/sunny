@@ -33,6 +33,21 @@
         </button>
       </div>
 
+      <section class="settings" id="settings" hidden>
+        <header class="settings-head">
+          <button class="icon-btn" id="settingsBack" type="button" title="Back (Esc)">‹</button>
+          <span class="settings-title">Settings</span>
+          <span class="spacer"></span>
+          <span class="settings-saved" id="settingsSaved"></span>
+        </header>
+        <div class="settings-body" id="settingsBody"></div>
+        <footer class="hints settings-foot">
+          <span><kbd>Esc</kbd> back</span>
+          <span class="spacer"></span>
+          <span class="settings-note">Changes are saved automatically</span>
+        </footer>
+      </section>
+
       <main class="body">
         <div class="list" id="list" role="listbox" aria-label="Results"></div>
         <aside class="detail" id="detail" hidden></aside>

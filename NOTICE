@@ -17,3 +17,8 @@ app search, clipboard history, text expander (snippets), file search,
 emoji picker, calculator, window switcher, and extension support
 compatible with the Raycast extension ecosystem.
 Emoji dataset: generated from github/gemoji (MIT) via scripts/make-emojis.ps1.
+
+UI font: Inter (SIL Open Font License 1.1), bundled from the Sonora project
+(https://github.com/sonorahq/sonora, assets/fonts). Sunny labels this option
+"Sonora (Inter)" and uses it as the default typeface. Sonora is a design
+reference only — Sunny is not affiliated with or endorsed by the Sonora project.

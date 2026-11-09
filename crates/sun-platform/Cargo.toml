@@ -18,3 +18,4 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 png = "0.18"
+winreg = "0.56"

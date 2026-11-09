@@ -185,3 +185,55 @@ pub fn send_paste() -> bool {
 pub fn extract_icon_png(_path: &str) -> Option<Vec<u8>> {
     None
 }
+
+/// Ubah opasitas jendela native (persen). Jendela tetap opaque — kita hanya
+/// memakai layered window + alpha byte, aman untuk WebView2 (tanpa compositing
+/// transparan yang tidak andal di mesin ini).
+#[cfg(windows)]
+pub fn set_window_opacity(hwnd: isize, percent: u32) {
+    use windows::Win32::Foundation::{COLORREF, HWND};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongW, SetLayeredWindowAttributes, SetWindowLongW, GWL_EXSTYLE, LWA_ALPHA,
+        WS_EX_LAYERED,
+    };
+    let h = HWND(hwnd as *mut core::ffi::c_void);
+    let alpha = ((percent.clamp(20, 100) * 255) / 100) as u8;
+    unsafe {
+        let ex = GetWindowLongW(h, GWL_EXSTYLE);
+        SetWindowLongW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as i32);
+        let _ = SetLayeredWindowAttributes(h, COLORREF(0), alpha, LWA_ALPHA);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_window_opacity(_hwnd: isize, _percent: u32) {}
+
+/// Daftarkan/lepas Sunny di autostart user (`HKCU\...\Run`), tanpa admin.
+#[cfg(windows)]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .map_err(|e| format!("registry: {e}"))?;
+
+    if enabled {
+        let exe = std::env::current_exe().map_err(|e| format!("exe path: {e}"))?;
+        key.set_value("Sunny", &format!("\"{}\"", exe.display()))
+            .map_err(|e| format!("registry: {e}"))?;
+    } else {
+        match key.delete_value("Sunny") {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("registry: {e}")),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn set_autostart(_enabled: bool) -> Result<(), String> {
+    Ok(())
+}

@@ -12,13 +12,41 @@ const clipFilterEl = document.getElementById("clipFilter");
 const pauseBtnEl = document.getElementById("pauseBtn");
 const pauseLabelEl = document.getElementById("pauseLabel");
 const pauseIcoEl = document.getElementById("pauseIco");
+const settingsEl = document.getElementById("settings");
+const settingsBodyEl = document.getElementById("settingsBody");
+const settingsBackEl = document.getElementById("settingsBack");
+const settingsSavedEl = document.getElementById("settingsSaved");
 
 let mode = "apps"; // "apps" | "emoji" | "clip"
+let settingsOpen = false;
+let capturingHotkey = false;
+
+// Preferensi (default aman; ditimpa oleh settings_get saat startup).
+let SETTINGS = {
+  open_at_login: false,
+  show_in_tray: true,
+  hotkey: "Alt+Space",
+  font: "sonora",
+  font_size: 14,
+  opacity: 100,
+  blur_ui: false,
+  window_mode: "expanded",
+};
+let SETTINGS_ERROR = "";
+let saveTimer = null;
+let lastPreviewAt = 0;
+
 let ALL_EMOJI = []; // diisi async saat startup
 invoke("emoji_all").then((data) => {
   ALL_EMOJI = data;
   refresh();
 });
+invoke("settings_get")
+  .then((s) => {
+    SETTINGS = s;
+    applyAppearance();
+  })
+  .catch(() => {});
 let items = [];
 let selected = 0;
 
@@ -33,6 +61,8 @@ const COMMANDS = [
     keys: "clipboard history riwayat clipboard papan klip" },
   { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker",
     keys: "emoji picker emotikon" },
+  { kind: "cmd", cmd: "settings", icon: "⚙️", name: "Settings",
+    keys: "settings preferences setelan pengaturan" },
 ];
 
 const MODE_LABEL = {
@@ -190,6 +220,7 @@ function renderFooter() {
       <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
       <span><kbd>↵</kbd> select</span>
       <span><kbd>:</kbd> emoji</span>
+      <span><kbd>Ctrl</kbd><kbd>,</kbd> settings</span>
       <span><kbd>Alt</kbd>+<kbd>Space</kbd> hide</span>`;
   }
 }
@@ -279,6 +310,356 @@ function render() {
   renderFooter();
 }
 
+/* ── Settings: penerapan + panel ───────────────────────── */
+
+function applyAppearance() {
+  document.documentElement.style.setProperty("--fs", SETTINGS.font_size + "px");
+  document.body.classList.toggle("font-system", SETTINGS.font === "system");
+  document.body.classList.toggle("blur-ui", !!SETTINGS.blur_ui);
+  document.body.classList.toggle("compact", SETTINGS.window_mode === "compact");
+}
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function settingsSection(title, rows) {
+  const sec = el("section", "settings-section");
+  sec.appendChild(el("h3", null, title));
+  const group = el("div", "settings-group");
+  group.append(...rows);
+  sec.appendChild(group);
+  return sec;
+}
+
+function settingsRow(label, desc, control) {
+  const row = el("div", "settings-row");
+  const left = el("div", "label");
+  left.appendChild(el("div", "t", label));
+  if (desc) left.appendChild(el("div", "d", desc));
+  const right = el("div", "control");
+  right.appendChild(control);
+  row.append(left, right);
+  return row;
+}
+
+function toggleControl(on, onChange) {
+  const btn = el("button", "switch" + (on ? " on" : ""));
+  btn.type = "button";
+  btn.setAttribute("role", "switch");
+  btn.setAttribute("aria-checked", String(on));
+  btn.onclick = () => {
+    const next = !btn.classList.contains("on");
+    btn.classList.toggle("on", next);
+    btn.setAttribute("aria-checked", String(next));
+    onChange(next);
+  };
+  return btn;
+}
+
+function fontControl() {
+  const sel = el("select", "select");
+  for (const [value, label] of [["sonora", "Sonora (Inter)"], ["system", "System"]]) {
+    const o = el("option", null, label);
+    o.value = value;
+    sel.appendChild(o);
+  }
+  sel.value = SETTINGS.font;
+  sel.onchange = () => onSettingChange({ font: sel.value }, true);
+  return sel;
+}
+
+function stepperControl(start, min, max, onChange) {
+  let value = start;
+  const wrap = el("div", "stepper");
+  const minus = el("button", null, "−");
+  const plus = el("button", null, "+");
+  const val = el("span", "val");
+  minus.type = plus.type = "button";
+  const sync = () => {
+    val.textContent = `${value} px`;
+    minus.disabled = value <= min;
+    plus.disabled = value >= max;
+  };
+  minus.onclick = () => {
+    if (value > min) {
+      value--;
+      sync();
+      onChange(value);
+    }
+  };
+  plus.onclick = () => {
+    if (value < max) {
+      value++;
+      sync();
+      onChange(value);
+    }
+  };
+  sync();
+  wrap.append(minus, val, plus);
+  return wrap;
+}
+
+function sliderControl(start, min, max, onChange) {
+  const wrap = el("div", "slider-wrap");
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(start);
+  const pct = el("span", "pct", `${start}%`);
+  input.oninput = () => {
+    pct.textContent = `${input.value}%`;
+    onChange(Number(input.value));
+  };
+  wrap.append(input, pct);
+  return wrap;
+}
+
+function segmentControl(options, value, onChange) {
+  const wrap = el("div", "segment");
+  for (const [val, label] of options) {
+    const b = el("button", val === value ? "on" : "", label);
+    b.type = "button";
+    b.onclick = () => {
+      [...wrap.children].forEach((c) => c.classList.toggle("on", c === b));
+      onChange(val);
+    };
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+/* Hotkey capture — minimal satu modifier (atau tombol F1–F24). */
+let hotkeyBtnRef = null;
+
+function accelFromEvent(e) {
+  const mods = [];
+  if (e.ctrlKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Super");
+
+  let key = e.key;
+  const named = {
+    " ": "Space",
+    Spacebar: "Space",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    Escape: "Escape",
+    Enter: "Enter",
+    Tab: "Tab",
+    Backspace: "Backspace",
+    Delete: "Delete",
+    Insert: "Insert",
+    Home: "Home",
+    End: "End",
+    PageUp: "PageUp",
+    PageDown: "PageDown",
+  };
+  if (named[key]) key = named[key];
+  else if (/^f\d{1,2}$/i.test(key)) key = key.toUpperCase();
+  else if (/^[a-z]$/i.test(key)) key = key.toUpperCase();
+  else if (key.length !== 1) return null;
+
+  const fnKey = /^F\d{1,2}$/.test(key);
+  if (!mods.length && !fnKey) return null;
+  return [...mods, key].join("+");
+}
+
+function handleHotkeyCapture(e) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (e.key === "Escape") {
+    capturingHotkey = false;
+    if (hotkeyBtnRef) {
+      hotkeyBtnRef.classList.remove("capturing");
+      hotkeyBtnRef.textContent = SETTINGS.hotkey.replace(/\+/g, " + ");
+    }
+    return;
+  }
+  if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
+
+  const accel = accelFromEvent(e);
+  if (!accel) {
+    if (hotkeyBtnRef) hotkeyBtnRef.textContent = "Add Ctrl / Alt / Shift…";
+    return;
+  }
+  capturingHotkey = false;
+  setHotkey(accel);
+}
+
+async function setHotkey(accel) {
+  const prev = SETTINGS.hotkey;
+  SETTINGS.hotkey = accel;
+  if (hotkeyBtnRef) {
+    hotkeyBtnRef.classList.remove("capturing");
+    hotkeyBtnRef.textContent = accel.replace(/\+/g, " + ");
+  }
+  const err = await onSettingChange({}, true);
+  if (err) {
+    SETTINGS.hotkey = prev;
+    SETTINGS_ERROR = err;
+    invoke("settings_update", { settings: SETTINGS }).catch(() => {});
+    renderSettings();
+  }
+}
+
+function hotkeyControl() {
+  const btn = el("button", "hotkey-btn", SETTINGS.hotkey.replace(/\+/g, " + "));
+  btn.type = "button";
+  btn.onclick = () => {
+    if (capturingHotkey) return;
+    capturingHotkey = true;
+    btn.classList.add("capturing");
+    btn.textContent = "Press a shortcut…";
+  };
+  hotkeyBtnRef = btn;
+  return btn;
+}
+
+function renderSettings() {
+  settingsBodyEl.innerHTML = "";
+  hotkeyBtnRef = null;
+
+  if (SETTINGS_ERROR) {
+    settingsBodyEl.appendChild(el("div", "settings-error", SETTINGS_ERROR));
+  }
+
+  settingsBodyEl.append(
+    settingsSection("General", [
+      settingsRow(
+        "Open at Login",
+        "Launch Sunny automatically when you sign in.",
+        toggleControl(SETTINGS.open_at_login, (v) =>
+          onSettingChange({ open_at_login: v }, true)
+        )
+      ),
+      settingsRow(
+        "Show in System Tray",
+        "Keep the Sunny icon in the notification area.",
+        toggleControl(SETTINGS.show_in_tray, (v) =>
+          onSettingChange({ show_in_tray: v }, true)
+        )
+      ),
+      settingsRow(
+        "Sunny Hotkey",
+        "Global shortcut to show or hide the launcher.",
+        hotkeyControl()
+      ),
+    ]),
+    settingsSection("Appearance", [
+      settingsRow(
+        "Font",
+        "Sonora ships Inter — the default Sunny typeface.",
+        fontControl()
+      ),
+      settingsRow(
+        "Font Size",
+        "Base text size across the launcher.",
+        stepperControl(SETTINGS.font_size, 12, 20, (v) =>
+          onSettingChange({ font_size: v })
+        )
+      ),
+    ]),
+    settingsSection("Window", [
+      settingsRow(
+        "Opacity",
+        "Overall window transparency.",
+        sliderControl(SETTINGS.opacity, 40, 100, (v) =>
+          onSettingChange({ opacity: v })
+        )
+      ),
+      settingsRow(
+        "Blur UI",
+        "Frosted-glass backdrop behind the launcher.",
+        toggleControl(SETTINGS.blur_ui, (v) =>
+          onSettingChange({ blur_ui: v }, true)
+        )
+      ),
+      settingsRow(
+        "Window Mode",
+        "Raycast-style density of the launcher window.",
+        segmentControl(
+          [["compact", "Raycast Compact"], ["expanded", "Raycast Expanded"]],
+          SETTINGS.window_mode,
+          (v) => onSettingChange({ window_mode: v }, true)
+        )
+      ),
+    ])
+  );
+}
+
+function openSettings() {
+  settingsOpen = true;
+  capturingHotkey = false;
+  mode = "apps";
+  queryEl.value = "";
+  queryEl.blur();
+  document.body.classList.add("settings-open");
+  settingsEl.hidden = false;
+  invoke("settings_resize", { open: true }).catch(() => {});
+  renderSettings();
+}
+
+function closeSettings() {
+  settingsOpen = false;
+  capturingHotkey = false;
+  document.body.classList.remove("settings-open");
+  settingsEl.hidden = true;
+  applyAppearance();
+  invoke("settings_resize", { open: false }).catch(() => {});
+  queryEl.value = "";
+  refresh();
+  queryEl.focus();
+}
+
+let savedTimer = null;
+function flashSaved() {
+  settingsSavedEl.textContent = "Saved";
+  settingsSavedEl.classList.add("show");
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => settingsSavedEl.classList.remove("show"), 1200);
+}
+
+async function saveSettings() {
+  try {
+    SETTINGS = await invoke("settings_update", { settings: SETTINGS });
+    SETTINGS_ERROR = "";
+    applyAppearance();
+    flashSaved();
+    return "";
+  } catch (err) {
+    SETTINGS_ERROR = String(err);
+    renderSettings();
+    return SETTINGS_ERROR;
+  }
+}
+
+function onSettingChange(patch, immediate = false) {
+  Object.assign(SETTINGS, patch);
+  SETTINGS_ERROR = "";
+  applyAppearance();
+
+  // Preview native (opacity/ukuran jendela) — throttle agar slider tetap ringan.
+  const now = performance.now();
+  if (immediate || now - lastPreviewAt > 70) {
+    lastPreviewAt = now;
+    invoke("settings_preview", { settings: SETTINGS }).catch(() => {});
+  }
+
+  clearTimeout(saveTimer);
+  if (immediate) return saveSettings();
+  saveTimer = setTimeout(saveSettings, 300);
+  return Promise.resolve("");
+}
+
 /* ── Pemuatan data per mode ────────────────────────────── */
 
 const fuzzy = (needle, hay) => {
@@ -294,6 +675,7 @@ const fuzzy = (needle, hay) => {
 };
 
 async function refresh() {
+  if (settingsOpen) return;
   const raw = queryEl.value;
   const q = raw.trim();
 
@@ -369,6 +751,10 @@ async function activate(i) {
     await navigator.clipboard?.writeText(value).catch(() => invoke("copy_to_clipboard", { text: value }));
     hideWindow();
   } else if (item.kind === "cmd") {
+    if (item.cmd === "settings") {
+      openSettings();
+      return;
+    }
     mode = item.cmd;
     queryEl.value = "";
     queryEl.placeholder = MODE_LABEL[mode];
@@ -386,8 +772,12 @@ async function activate(i) {
 }
 
 /* ── Fokus otomatis ────────────────────────────────────── */
-listen("sunny:shown", () => queryEl.focus());
-window.addEventListener("focus", () => queryEl.focus());
+listen("sunny:shown", () => {
+  if (!settingsOpen) queryEl.focus();
+});
+window.addEventListener("focus", () => {
+  if (!settingsOpen) queryEl.focus();
+});
 queryEl.focus();
 
 /* ── Data berubah di background → segarkan ─────────────── */
@@ -395,6 +785,9 @@ listen("sunny:apps-updated", () => refresh());
 listen("sunny:clip-updated", () => {
   if (mode === "clip") refresh();
 });
+/* Menu tray → buka panel Settings */
+listen("sunny:open-settings", () => openSettings());
+settingsBackEl.addEventListener("click", closeSettings);
 
 queryEl.addEventListener("input", refresh);
 clipFilterEl.addEventListener("change", () => {
@@ -409,6 +802,28 @@ pauseBtnEl.addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (e) => {
+  // Sedang merekam hotkey baru → tangkap semua tombol.
+  if (capturingHotkey) {
+    handleHotkeyCapture(e);
+    return;
+  }
+
+  // Panel Settings terbuka: Esc kembali ke launcher.
+  if (settingsOpen) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeSettings();
+    }
+    return;
+  }
+
+  // Ctrl+, → Settings (pintasan ala Raycast).
+  if (e.ctrlKey && !e.altKey && (e.key === "," || e.key === "<")) {
+    e.preventDefault();
+    openSettings();
+    return;
+  }
+
   const max = Math.max(items.length - 1, 0);
   if (e.key === "ArrowDown") {
     e.preventDefault();

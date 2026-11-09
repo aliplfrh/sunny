@@ -28,9 +28,60 @@ fn show_or_focus_main_window(app: &tauri::AppHandle) {
 
 use std::sync::Mutex;
 use sun_core::clipboard::{ClipboardStore, ClipEntry};
+use sun_core::settings::Settings;
 
 /// Cache in-memory daftar aplikasi — menghindari disk IO per-tombol (perf fix).
 pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
+
+/// Preferensi aktif — dimuat saat start, diubah dari panel Settings.
+pub struct SettingsState(pub Mutex<Settings>);
+
+/// Panel Settings sedang terbuka? Saat terbuka jendela dibuat lebih tinggi,
+/// jadi mode Compact/Expanded baru diterapkan setelah panel ditutup.
+pub struct SettingsUiOpen(pub std::sync::atomic::AtomicBool);
+
+/// Terapkan opasitas native (layered window, tanpa transparansi WebView2).
+fn apply_opacity(app: &tauri::AppHandle, percent: u32) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Ok(hwnd) = window.hwnd() {
+            sun_platform::set_window_opacity(hwnd.0 as isize, percent);
+        }
+    }
+}
+
+/// Ubah ukuran jendela sesuai mode (Compact/Expanded) lalu pusatkan kembali.
+fn apply_window_mode(app: &tauri::AppHandle, settings: &Settings) {
+    if app
+        .state::<SettingsUiOpen>()
+        .0
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return; // panel Settings sedang memakai jendela tinggi
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let target_w = 720.0;
+        let target_h = settings.window_height();
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let changed = match window.inner_size() {
+            Ok(s) => {
+                (s.width as f64 / scale - target_w).abs() > 1.0
+                    || (s.height as f64 / scale - target_h).abs() > 1.0
+            }
+            Err(_) => true,
+        };
+        if changed {
+            let _ = window.set_size(tauri::LogicalSize::new(target_w, target_h));
+            let _ = window.center();
+        }
+    }
+}
+
+/// Tampilkan/sembunyikan ikon tray tanpa membangun ulang.
+fn apply_tray(app: &tauri::AppHandle, visible: bool) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_visible(visible);
+    }
+}
 
 #[tauri::command]
 fn ping() -> String {
@@ -143,6 +194,74 @@ fn emoji_all() -> &'static [sun_core::emoji::EmojiItem] {
     sun_core::emoji::all()
 }
 
+/// Ukuran jendela saat panel Settings dibuka/ditutup — tidak mengubah setelan.
+#[tauri::command]
+fn settings_resize(app: tauri::AppHandle, open: bool) {
+    use std::sync::atomic::Ordering;
+    app.state::<SettingsUiOpen>().0.store(open, Ordering::Relaxed);
+    if let Some(window) = app.get_webview_window("main") {
+        if open {
+            let _ = window.set_size(tauri::LogicalSize::new(720.0, 700.0));
+            let _ = window.center();
+        } else {
+            let settings = app.state::<SettingsState>().0.lock().unwrap().clone();
+            apply_window_mode(&app, &settings);
+        }
+    }
+}
+
+/// Preferensi tersimpan (dipakai UI saat panel Settings dibuka).
+#[tauri::command]
+fn settings_get(state: tauri::State<'_, SettingsState>) -> Settings {
+    state.0.lock().unwrap().clone()
+}
+
+/// Terapkan hanya efek visual (opacity + ukuran jendela) — dipakai saat
+/// slider/stepper digeser, belum menyimpan ke disk.
+#[tauri::command]
+fn settings_preview(app: tauri::AppHandle, settings: Settings) {
+    let mut s = settings;
+    s.normalize();
+    apply_opacity(&app, s.opacity);
+    apply_window_mode(&app, &s);
+}
+
+/// Simpan + terapkan seluruh setelan (hotkey, tray, autostart, opacity, mode).
+#[tauri::command]
+fn settings_update(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SettingsState>,
+    settings: Settings,
+) -> Result<Settings, String> {
+    let mut next = settings;
+    next.normalize();
+
+    let current = state.0.lock().unwrap().clone();
+
+    // Hotkey lebih dulu — bila gagal didaftarkan, jangan ubah setelan lain.
+    if next.hotkey != current.hotkey {
+        let gs = app.global_shortcut();
+        let _ = gs.unregister(current.hotkey.as_str());
+        if let Err(e) = gs.register(next.hotkey.as_str()) {
+            let _ = gs.register(current.hotkey.as_str());
+            return Err(format!("Hotkey cannot be registered: {e}"));
+        }
+    }
+
+    if next.open_at_login != current.open_at_login {
+        sun_platform::set_autostart(next.open_at_login)?;
+    }
+
+    apply_tray(&app, next.show_in_tray);
+    apply_opacity(&app, next.opacity);
+    apply_window_mode(&app, &next);
+    next.save();
+
+    *state.0.lock().unwrap() = next.clone();
+    let _ = app.emit("sunny:settings-updated", &next);
+    Ok(next)
+}
+
 #[cfg(target_os = "windows")]
 fn launching_app(path: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
@@ -169,6 +288,8 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState(Mutex::new(Vec::new())))
         .manage(ClipboardStore::new())
+        .manage(SettingsState(Mutex::new(Settings::load())))
+        .manage(SettingsUiOpen(std::sync::atomic::AtomicBool::new(false)))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -191,13 +312,25 @@ fn main() {
             clip_toggle_pause,
             clip_delete,
             paste_to_active_window,
-            emoji_all
+            emoji_all,
+            settings_get,
+            settings_preview,
+            settings_update,
+            settings_resize
         ])
         .setup(|app| {
             use tauri::menu::MenuBuilder;
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-            app.global_shortcut().register("Alt+Space")?;
+            // ── Setelan aktif (sudah dimuat sebelum window dibuat) ──
+            let active = app.state::<SettingsState>().0.lock().unwrap().clone();
+
+            // Hotkey tersimpan; fallback ke default bila gagal (mis. sudah dipakai).
+            if app.global_shortcut().register(active.hotkey.as_str()).is_err() {
+                let _ = app.global_shortcut().register("Alt+Space");
+            }
+            apply_opacity(app.handle(), active.opacity);
+            apply_window_mode(app.handle(), &active);
 
             // ── Tray icon: klik kiri toggle, klik kanan menu ──
             // Ikon brand Sunny (dari logo pack) — dibaca langsung dari bytes
@@ -207,8 +340,10 @@ fn main() {
                 .or_else(|| app.default_window_icon().cloned());
             if let Some(icon) = tray_icon {
                 let menu = MenuBuilder::new(app)
-                    .text("show", "Tampilkan Sunny")
-                    .text("quit", "Keluar")
+                    .text("show", "Show Sunny")
+                    .text("settings", "Settings…")
+                    .separator()
+                    .text("quit", "Quit")
                     .build()?;
 
                 let _tray = TrayIconBuilder::with_id("main-tray")
@@ -218,6 +353,10 @@ fn main() {
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => show_or_focus_main_window(app),
+                        "settings" => {
+                            show_or_focus_main_window(app);
+                            let _ = app.emit("sunny:open-settings", ());
+                        }
                         "quit" => app.exit(0),
                         _ => {}
                     })
@@ -235,6 +374,7 @@ fn main() {
                     })
                     .build(app)
                     .ok();
+                apply_tray(app.handle(), active.show_in_tray);
             }
 
             // Bug 2 yang juga dilaporkan: launcher harus bisa tutup tanpa
