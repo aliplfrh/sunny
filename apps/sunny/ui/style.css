@@ -33,6 +33,10 @@
   --bg-soft: rgba(255, 255, 255, 0.04);
   --bg-hover: rgba(255, 255, 255, 0.07);
   --accent: rgba(240, 140, 40, 0.92); /* aksen matahari */
+  /* Turunan aksen: diisi ulang dari JS saat warna aksen berubah. */
+  --accent-rgb: 240, 140, 40;
+  --accent-soft: rgba(240, 140, 40, 0.18);
+  --accent-border: rgba(240, 140, 40, 0.55);
   --text: #ececef;
   --text-dim: #9a9aa2;
   --radius: 14px;
@@ -449,7 +453,7 @@ body.theme-light .about-card img {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(240, 140, 40, 0.18);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: calc(var(--fs) * 0.64);
 }
@@ -625,7 +629,7 @@ kbd {
   color: var(--text-dim);
 }
 .settings-search-input:focus {
-  border-color: rgba(240, 140, 40, 0.55);
+  border-color: var(--accent-border);
 }
 
 .settings-tabs {
@@ -895,9 +899,74 @@ kbd {
   outline-offset: 2px;
 }
 
+/* Accent color picker */
+.accent-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 260px;
+}
+.accent-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--sw);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.accent-swatch:hover {
+  transform: scale(1.12);
+}
+.accent-swatch.on {
+  box-shadow: 0 0 0 2px var(--sheet-rgb), 0 0 0 4px var(--sw);
+}
+.accent-pickers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.accent-native {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+}
+.accent-native::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.accent-native::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+.accent-hex {
+  width: 84px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  background: var(--field-bg);
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: calc(var(--fs) * 0.82);
+  outline: none;
+}
+.accent-hex:focus {
+  border-color: var(--accent-border);
+}
+
 /* Select */
-.select {
-  appearance: none;
+.select {  appearance: none;
   -webkit-appearance: none;
   background-color: var(--bg-soft);
   border: 1px solid var(--hairline);

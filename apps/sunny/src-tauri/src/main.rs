@@ -122,12 +122,30 @@ fn ping() -> String {
     "pong".into()
 }
 
+/// Indeks aplikasi lengkap: shortcut Start Menu + aplikasi Microsoft Store.
+///
+/// Lapisan platform membaca manifest AppX dan menyediakan isi logo; konversi ke
+/// tipe netral (`StoreAppInput`) terjadi di sini supaya `sun-core` tetap tidak
+/// bergantung pada `sun-platform`.
+fn load_app_index() -> Vec<sun_core::apps::AppEntry> {
+    let shortcuts = sun_core::apps::scan_installed_apps();
+    let store = sun_platform::list_store_apps()
+        .into_iter()
+        .map(|app| sun_core::apps::StoreAppInput {
+            icon_png: sun_platform::store_app_icon_png(app.icon_path.as_deref()),
+            name: app.name,
+            app_id: app.app_id,
+        })
+        .collect();
+    sun_core::apps::merge_store_apps(shortcuts, store)
+}
+
 /// Daftar semua aplikasi terinstal (sumber: cache; fallback scan bila masih kosong).
 #[tauri::command]
 fn list_apps(state: tauri::State<'_, AppState>) -> Vec<sun_core::apps::AppEntry> {
     let mut apps = state.0.lock().unwrap();
     if apps.is_empty() {
-        *apps = sun_core::apps::scan_installed_apps();
+        *apps = load_app_index();
     }
     apps.clone()
 }
@@ -140,7 +158,7 @@ fn search_apps(
 ) -> Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>> {
     let mut apps = state.0.lock().unwrap();
     if apps.is_empty() {
-        *apps = sun_core::apps::scan_installed_apps();
+        *apps = load_app_index();
     }
     sun_core::search::rank(&query, &apps)
 }
@@ -520,8 +538,16 @@ fn settings_update(
     Ok(next)
 }
 
-/// Luncurkan aplikasi lewat shortcut `.lnk` (ShellExecuteW, buka dengan handler default).
+/// Luncurkan aplikasi.
+///
+/// - Shortcut `.lnk` / path biasa → `ShellExecuteW` (handler default Windows).
+/// - AppUserModelID (`Publisher.Nama_cv...!App`) → activation manager Microsoft
+///   Store. Bentuknya khas: ada `!` dan tidak ada pemisah path, jadi tidak
+///   mungkin tertukar dengan path file.
 fn launching_app(path: &str) -> Result<(), String> {
+    if path.contains('!') && !path.contains('\\') && !path.contains('/') {
+        return sun_platform::launch_store_app(path);
+    }
     sun_platform::shell_open(path)
 }
 
@@ -675,7 +701,7 @@ fn main() {
             std::thread::spawn(move || {
                 let new_icons = sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
                 // Isi ulang cache aplikasi (kini ikon asli tersedia)
-                let apps = sun_core::apps::scan_installed_apps();
+                let apps = load_app_index();
                 if let Some(st) = state_handle.try_state::<AppState>() {
                     *st.0.lock().unwrap() = apps;
                 }

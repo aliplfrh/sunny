@@ -80,6 +80,13 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
       (`include_files`, `file_results`), no need to open the "Search Files" command
 - [x] **Clean app icons** — `.lnk` shortcuts are resolved to their target executable before icon
       extraction, so the shortcut-arrow overlay badge is gone
+- [x] **Microsoft Store apps** — AppX/MSIX packages from the AppModel registry are merged into the
+      app index (manifest parsing, `Square44x44Logo` variant resolution, launch through
+      `IApplicationActivationManager`), so Store-only apps like WhatsApp are searchable
+- [x] **Result categories** — app rows show what they are: *Application*, *Game*, or
+      *Windows Settings* (folder- and name-based detection)
+- [x] **Accent color** — Launcher → Accent Color: ten curated presets, a native color picker, and a
+      hex field; all highlights, switches, and selection bars derive from it (`--accent*` variables)
 - [ ] Window switcher
 
 ## Porting Principles

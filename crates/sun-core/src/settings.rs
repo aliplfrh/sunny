@@ -41,6 +41,8 @@ pub struct Settings {
     pub file_results: u32,
     /// "system" | "light" | "dark".
     pub theme: String,
+    /// Warna aksen (hex `#rrggbb`) untuk sorotan, tombol aktif, dan switch.
+    pub accent: String,
 }
 
 impl Default for Settings {
@@ -61,6 +63,7 @@ impl Default for Settings {
             include_files: true,
             file_results: 8,
             theme: "system".into(),
+            accent: "#f08c28".into(),
         }
     }
 }
@@ -124,6 +127,8 @@ impl Settings {
         if !matches!(self.theme.as_str(), "light" | "dark") {
             self.theme = "system".into();
         }
+        // Aksen harus hex #rrggbb yang valid; kalau tidak, kembali ke oranye Sunny.
+        self.accent = normalize_hex_color(&self.accent).unwrap_or_else(|| "#f08c28".into());
     }
 
     /// Tinggi jendela (logical px) untuk mode yang aktif.
@@ -136,9 +141,72 @@ impl Settings {
     }
 }
 
+/// Validasi warna hex `#rrggbb` (atau `#rgb`) dan kembalikan bentuk kanonik
+/// `#rrggbb` huruf kecil. `None` bila bukan warna yang sah.
+pub fn normalize_hex_color(input: &str) -> Option<String> {
+    let s = input.trim().trim_start_matches('#');
+    let expanded = match s.len() {
+        3 => s.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => s.to_string(),
+        _ => return None,
+    };
+    if !expanded.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", expanded.to_ascii_lowercase()))
+}
+
+/// Pecah `#rrggbb` menjadi komponen `(r, g, b)`.
+pub fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    let s = normalize_hex_color(hex)?;
+    let r = u8::from_str_radix(&s[1..3], 16).ok()?;
+    let g = u8::from_str_radix(&s[3..5], 16).ok()?;
+    let b = u8::from_str_radix(&s[5..7], 16).ok()?;
+    Some((r, g, b))
+}
+
 fn settings_path() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir());
     base.join("Sunny").join("settings.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_hex_colors() {
+        assert_eq!(normalize_hex_color("#F08C28").as_deref(), Some("#f08c28"));
+        assert_eq!(normalize_hex_color("f08c28").as_deref(), Some("#f08c28"));
+        assert_eq!(normalize_hex_color("#abc").as_deref(), Some("#aabbcc"));
+        assert_eq!(
+            normalize_hex_color("  #123456  ").as_deref(),
+            Some("#123456")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_colors() {
+        assert!(normalize_hex_color("").is_none());
+        assert!(normalize_hex_color("#12345").is_none());
+        assert!(normalize_hex_color("#gggggg").is_none());
+        assert!(normalize_hex_color("orange").is_none());
+    }
+
+    #[test]
+    fn splits_rgb() {
+        assert_eq!(hex_to_rgb("#f08c28"), Some((240, 140, 40)));
+        assert_eq!(hex_to_rgb("#000000"), Some((0, 0, 0)));
+        assert_eq!(hex_to_rgb("#ffffff"), Some((255, 255, 255)));
+    }
+
+    #[test]
+    fn accent_falls_back_to_default() {
+        let mut s = Settings::default();
+        s.accent = "not-a-color".into();
+        s.normalize();
+        assert_eq!(s.accent, "#f08c28");
+    }
 }

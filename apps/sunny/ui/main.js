@@ -47,6 +47,10 @@ let SETTINGS = {
   emoji_prefix: ":",
   backspace_back: true,
   vim_nav: false,
+  include_files: true,
+  file_results: 8,
+  theme: "system",
+  accent: "#f08c28",
 };
 let SETTINGS_ERROR = "";
 let saveTimer = null;
@@ -396,7 +400,7 @@ function render() {
       if (item.kind === "calc") sub.textContent = "Enter: copy";
       else if (item.kind === "emoji") sub.textContent = "Enter: copy";
       else if (item.kind === "cmd") sub.textContent = "Enter: open";
-      else sub.textContent = "Start Menu";
+      else sub.textContent = item.category || "Application";
       row.appendChild(sub);
     }
 
@@ -439,6 +443,7 @@ function applyAppearance() {
   // Opacity = alpha tint background saja. Teks/ikon di atas sheet tetap pekat.
   const pct = Math.min(100, Math.max(40, Number(SETTINGS.opacity) || 100));
   document.documentElement.style.setProperty("--bg-tint", (pct / 100).toFixed(2));
+  applyAccent(SETTINGS.accent);
   const theme = effectiveTheme();
   document.body.classList.toggle("theme-light", theme === "light");
   document.body.classList.toggle("theme-dark", theme === "dark");
@@ -446,6 +451,54 @@ function applyAppearance() {
   document.body.classList.toggle("blur-ui", !!SETTINGS.blur_ui);
   document.body.classList.toggle("compact", SETTINGS.window_mode === "compact");
   document.body.classList.toggle("no-footer", !SETTINGS.show_footer);
+}
+
+/* ── Warna aksen ───────────────────────────────────────── */
+
+const DEFAULT_ACCENT = "#f08c28";
+
+// Preset yang enak dipakai di tema gelap maupun terang.
+const ACCENT_PRESETS = [
+  ["Sunny", "#f08c28"],
+  ["Amber", "#e8a33d"],
+  ["Coral", "#f2685a"],
+  ["Rose", "#e8557f"],
+  ["Violet", "#9b6cf0"],
+  ["Indigo", "#5b7cf5"],
+  ["Sky", "#3aa8e8"],
+  ["Teal", "#2bb5a0"],
+  ["Green", "#3fae5a"],
+  ["Graphite", "#8a8a94"],
+];
+
+function normalizeHex(input) {
+  const s = String(input || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(s)) {
+    return "#" + s.split("").map((c) => c + c).join("").toLowerCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(s)) return "#" + s.toLowerCase();
+  return null;
+}
+
+function hexToRgb(hex) {
+  const h = normalizeHex(hex) || DEFAULT_ACCENT;
+  return [
+    parseInt(h.slice(1, 3), 16),
+    parseInt(h.slice(3, 5), 16),
+    parseInt(h.slice(5, 7), 16),
+  ];
+}
+
+/// Terapkan aksen ke CSS variable. Turunannya (soft/border) dihitung di sini
+/// supaya CSS tidak perlu tahu format warnanya.
+function applyAccent(hex) {
+  const color = normalizeHex(hex) || DEFAULT_ACCENT;
+  const [r, g, b] = hexToRgb(color);
+  const root = document.documentElement.style;
+  root.setProperty("--accent", `rgba(${r}, ${g}, ${b}, 0.92)`);
+  root.setProperty("--accent-rgb", `${r}, ${g}, ${b}`);
+  root.setProperty("--accent-soft", `rgba(${r}, ${g}, ${b}, 0.18)`);
+  root.setProperty("--accent-border", `rgba(${r}, ${g}, ${b}, 0.55)`);
 }
 
 // Ikuti perubahan tema Windows saat setelan "System" aktif.
@@ -555,8 +608,81 @@ function sliderControl(start, min, max, onChange) {
   return wrap;
 }
 
-function segmentControl(options, value, onChange) {
-  const wrap = el("div", "segment");
+/* Pemilih warna aksen: preset swatch + input hex + color picker native. */
+function accentControl(onChange) {
+  const wrap = el("div", "accent-control");
+
+  const swatches = el("div", "accent-swatches");
+  const paint = () => {
+    [...swatches.children].forEach((b) => {
+      b.classList.toggle("on", normalizeHex(b.dataset.color) === normalizeHex(SETTINGS.accent));
+    });
+    hexInput.value = normalizeHex(SETTINGS.accent) || DEFAULT_ACCENT;
+    native.value = normalizeHex(SETTINGS.accent) || DEFAULT_ACCENT;
+  };
+
+  for (const [name, color] of ACCENT_PRESETS) {
+    const b = el("button", "accent-swatch");
+    b.type = "button";
+    b.title = name;
+    b.setAttribute("aria-label", name);
+    b.dataset.color = color;
+    b.style.setProperty("--sw", color);
+    b.onclick = () => {
+      SETTINGS.accent = color;
+      applyAccent(color);
+      paint();
+      onChange(color);
+    };
+    swatches.appendChild(b);
+  }
+
+  const pickers = el("div", "accent-pickers");
+
+  const native = document.createElement("input");
+  native.type = "color";
+  native.className = "accent-native";
+  native.title = "Pick a custom color";
+  native.oninput = () => {
+    SETTINGS.accent = native.value;
+    applyAccent(native.value);
+    hexInput.value = native.value;
+    paint();
+    onChange(native.value);
+  };
+
+  const hexInput = document.createElement("input");
+  hexInput.type = "text";
+  hexInput.className = "accent-hex";
+  hexInput.spellcheck = false;
+  hexInput.maxLength = 7;
+  hexInput.placeholder = "#f08c28";
+  hexInput.oninput = () => {
+    const hex = normalizeHex(hexInput.value);
+    if (!hex) return; // biarkan user selesai mengetik
+    SETTINGS.accent = hex;
+    applyAccent(hex);
+    native.value = hex;
+    onChange(hex);
+  };
+  hexInput.onblur = () => paint();
+
+  const reset = el("button", "link-btn", "Reset");
+  reset.type = "button";
+  reset.onclick = () => {
+    SETTINGS.accent = DEFAULT_ACCENT;
+    applyAccent(DEFAULT_ACCENT);
+    paint();
+    onChange(DEFAULT_ACCENT);
+  };
+
+  pickers.append(native, hexInput, reset);
+  wrap.append(swatches, pickers);
+  paint();
+  return wrap;
+}
+
+function segmentControl(options, value, onChange) {  const wrap = el("div", "segment");
   for (const [val, label] of options) {
     const b = el("button", val === value ? "on" : "", label);
     b.type = "button";
@@ -827,8 +953,13 @@ function renderSettings() {
           )
         ),
         maybeRow(
+          "Accent Color",
+          "Highlight color for selections, switches, and active controls.",
+          accentControl((v) => onSettingChange({ accent: v }, true))
+        ),
+        maybeRow(
           "Font",
-          "Sonora ships Inter — the default Sunny typeface.",
+          "Sonora ships Inter - the default Sunny typeface.",
           fontControl()
         ),
         maybeRow(
@@ -1274,6 +1405,7 @@ async function refresh() {
     items.push(...pool.map((e) => ({ ...e, kind: "emoji" })));
   } else if (mode === "clip") {
     const clips = await invoke("clip_history");
+    if (seq !== refreshSeq) return;
     clipTotal = clips.length;
     const typeOK = (c) =>
       clipType === "all" || (clipType === "text" ? c.kind === "text" : c.kind !== "text");
@@ -1297,18 +1429,21 @@ async function refresh() {
     // mode apps — hasil kalkulator di urutan pertama bila kueri valid
     if (q) {
       const value = await invoke("calc", { query: q });
+      if (seq !== refreshSeq) return;
       if (value != null) items.push({ kind: "calc", expr: q, value });
     }
     if (!q) {
       // Daftar default hanya aplikasi — perintah internal tidak lagi "menempel"
       // di atas; muncul hanya bila dicari (Rows: "Clipboard History", "Emoji").
       const apps = await invoke("list_apps");
+      if (seq !== refreshSeq) return;
       items.push(...apps.map((app) => ({ ...app, kind: "app" })));
     } else {
       const cmds = COMMANDS
         .filter((c) => fuzzy(q, c.keys))
         .map(({ keys, ...c }) => c);
       const str = await invoke("search_apps", { query: q });
+      if (seq !== refreshSeq) return;
       items.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app" })));
 
       // File search langsung di pencarian utama (ala Raycast "Include Files in

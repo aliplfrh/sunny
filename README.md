@@ -72,6 +72,9 @@ Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you pic
 ### 🎨 A launcher that looks like it belongs
 
 - **Theme** — System, Light, or Dark, applied to both the launcher and Settings
+- **Accent color** — ten presets or any hex value; highlights, switches, and selections follow it
+- **Microsoft Store apps** — not just Start Menu shortcuts: WhatsApp, Spotify, Netflix and friends
+  are searchable and launchable too
 - **Background-only opacity** — dim the backdrop without fading your text and icons
 - **Blur** — soften the desktop behind the launcher
 - **Compact or Expanded** window modes
@@ -119,12 +122,14 @@ Sunny is at **v1.0.0** — the core feature set is complete and usable day to da
 | | Feature | State |
 |:--:|---|:--:|
 | 🔎 | App launcher with fuzzy search and real icons | ✅ |
+| 🏪 | Microsoft Store apps (WhatsApp, Spotify, …) | ✅ |
 | 📁 | File search, open or reveal in Explorer | ✅ |
 | 🧮 | Calculator | ✅ |
 | 😀 | Emoji picker (1,870 emoji) | ✅ |
 | 📋 | Clipboard history with paste-to-active-window | ✅ |
 | ⚙️ | Separate Settings window with search | ✅ |
 | 🎨 | Theme: System / Light / Dark | ✅ |
+| 🌈 | Accent color (presets or custom hex) | ✅ |
 | 🔄 | Signed auto-update | ✅ |
 | 🖥️ | System tray icon | ✅ |
 | 🪟 | Window switcher | 🚧 planned |

@@ -13,10 +13,13 @@ use std::path::{Path, PathBuf};
 pub struct AppEntry {
     /// Nama tampilan (nama file tanpa ekstensi)
     pub name: String,
-    /// Path lengkap ke shortcut .lnk — dibuka langsung untuk meluncurkan aplikasi
+    /// Path lengkap ke shortcut .lnk — dibuka langsung untuk meluncurkan aplikasi.
+    /// Untuk aplikasi Microsoft Store, ini berisi AppUserModelID.
     pub path: String,
-    /// Sumber entri (mis. "start-menu-user", "start-menu-system")
+    /// Sumber entri: "start-menu" atau "store".
     pub source: &'static str,
+    /// Kategori yang ditampilkan di baris hasil ("Application", "Game", ...).
+    pub category: &'static str,
     /// Ikon aplikasi sebagai data URL PNG (None bila belum ada cache).
     /// Ekstraksi asli dilakukan `build_icon_cache` di background.
     pub icon: Option<String>,
@@ -60,6 +63,22 @@ fn collect_shortcuts() -> Vec<String> {
     paths
 }
 
+/// Kategori yang ditampilkan pada baris hasil.
+///
+/// Windows menaruh shortcut game di folder `Games`, dan utilitas sistem mudah
+/// dikenali dari namanya. Sisanya dianggap aplikasi biasa.
+fn detect_category(name: &str, path: &str) -> &'static str {
+    let lower_name = name.trim().to_lowercase();
+    let lower_path = path.to_lowercase();
+    if lower_path.contains("\\games\\") || lower_name.contains("xbox") {
+        return "Game";
+    }
+    match lower_name.as_str() {
+        "settings" | "control panel" => "Windows Settings",
+        _ => "Application",
+    }
+}
+
 /// Kumpulkan aplikasi lengkap dengan ikon dari cache (tanpa ekstraksi = cepat).
 pub fn scan_installed_apps() -> Vec<AppEntry> {
     let mut apps: Vec<AppEntry> = collect_shortcuts()
@@ -73,6 +92,7 @@ pub fn scan_installed_apps() -> Vec<AppEntry> {
             let icon = cached_icon(&path)
                 .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
             AppEntry {
+                category: detect_category(&name, &path),
                 name,
                 path,
                 source: "start-menu",
@@ -80,6 +100,43 @@ pub fn scan_installed_apps() -> Vec<AppEntry> {
             }
         })
         .collect();
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps
+}
+
+/// Aplikasi Microsoft Store dalam bentuk netral, supaya `sun-core` tidak perlu
+/// bergantung pada `sun-platform`. `main.rs` yang mengonversinya.
+#[derive(Debug, Clone)]
+pub struct StoreAppInput {
+    pub name: String,
+    /// AppUserModelID, mis. `5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App`.
+    pub app_id: String,
+    /// Isi file logo paket (PNG), bila ada.
+    pub icon_png: Option<Vec<u8>>,
+}
+
+/// Gabungkan aplikasi Start Menu dengan aplikasi Microsoft Store.
+pub fn merge_store_apps(mut apps: Vec<AppEntry>, store: Vec<StoreAppInput>) -> Vec<AppEntry> {
+    let mut existing: std::collections::HashSet<String> =
+        apps.iter().map(|a| a.name.to_lowercase()).collect();
+
+    for app in store {
+        // Jangan duplikasi aplikasi yang sudah punya shortcut Start Menu.
+        if !existing.insert(app.name.to_lowercase()) {
+            continue;
+        }
+        let icon = app
+            .icon_png
+            .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
+        apps.push(AppEntry {
+            category: detect_category(&app.name, &app.app_id),
+            name: app.name,
+            path: app.app_id,
+            source: "store",
+            icon,
+        });
+    }
+
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     apps
 }
@@ -169,4 +226,63 @@ fn expand_env(raw: &str) -> Option<String> {
         return None;
     }
     Some(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, path: &str) -> AppEntry {
+        AppEntry {
+            name: name.into(),
+            path: path.into(),
+            source: "start-menu",
+            category: "Application",
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn categories_follow_folder_and_name() {
+        assert_eq!(
+            detect_category("Hades", r"C:\Start Menu\Programs\Games\Hades.lnk"),
+            "Game"
+        );
+        assert_eq!(
+            detect_category("Settings", r"C:\Start Menu\Programs\Settings.lnk"),
+            "Windows Settings"
+        );
+        assert_eq!(
+            detect_category("Notepad", r"C:\Start Menu\Programs\Notepad.lnk"),
+            "Application"
+        );
+    }
+
+    #[test]
+    fn store_apps_are_merged_without_duplicates() {
+        let base = vec![entry("WhatsApp", r"C:\x\WhatsApp.lnk")];
+        let merged = merge_store_apps(
+            base,
+            vec![
+                StoreAppInput {
+                    name: "WhatsApp".into(),
+                    app_id: "5319275A.WhatsAppDesktop_cv1!App".into(),
+                    icon_png: None,
+                },
+                StoreAppInput {
+                    name: "Spotify".into(),
+                    app_id: "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify".into(),
+                    icon_png: None,
+                },
+            ],
+        );
+        assert_eq!(merged.len(), 2);
+        assert!(merged
+            .iter()
+            .any(|a| a.name == "Spotify" && a.source == "store"));
+        assert!(merged
+            .iter()
+            .filter(|a| a.name == "WhatsApp")
+            .all(|a| a.source == "start-menu"));
+    }
 }

@@ -231,6 +231,256 @@ mod windows_imp {
 #[cfg(windows)]
 pub use windows_imp::{capture_screen_png, extract_icon_png, resolve_lnk_target};
 
+/// Satu aplikasi Microsoft Store (AppX/MSIX) yang bisa diluncurkan.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct StoreApp {
+    /// Nama tampilan dari manifest (`DisplayName`).
+    pub name: String,
+    /// AppUserModelID, mis. `5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App`.
+    pub app_id: String,
+    /// Path absolut ke logo `Square44x44Logo` (belum tentu ada).
+    pub icon_path: Option<String>,
+}
+
+/// Daftar aplikasi Microsoft Store yang terpasang untuk user saat ini.
+///
+/// Dibaca dari registry AppModel (tidak butuh PowerShell, jadi cepat dan tidak
+/// memunculkan jendela konsol). Hanya paket yang punya `<Application>` dengan
+/// `Executable` yang dianggap bisa diluncurkan.
+#[cfg(windows)]
+pub fn list_store_apps() -> Vec<StoreApp> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    const REPO: &str = r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
+
+    let Ok(root) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(REPO) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for pkg in root.enum_keys().flatten() {
+        let Ok(key) = root.open_subkey(&pkg) else {
+            continue;
+        };
+        let Ok(root_folder) = key.get_value::<String, _>("PackageRootFolder") else {
+            continue;
+        };
+        let manifest = std::path::Path::new(&root_folder).join("AppxManifest.xml");
+        let Ok(xml) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        // Nama paket penuh: `Name_Version_Arch__PublisherId`. AppUserModelID
+        // memakai *package family name* = `Name_PublisherId`, bukan nama paket
+        // saja — tanpa hash publisher, activation gagal.
+        let mut parts = pkg.split('_');
+        let Some(pkg_name) = parts.next() else {
+            continue;
+        };
+        let Some(publisher_id) = pkg.rsplit('_').next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let family_name = format!("{pkg_name}_{publisher_id}");
+        let fallback_name = package_display_name(pkg_name);
+        for app in parse_manifest_apps(&xml, &root_folder) {
+            // `ms-resource:` tidak bisa dibaca tanpa MRT Core; pakai nama paket
+            // yang sudah "dibersihkan" supaya hasilnya tetap masuk akal.
+            let name = if app.name.starts_with("ms-resource:") {
+                fallback_name.clone()
+            } else {
+                app.name.clone()
+            };
+            out.push(StoreApp {
+                name,
+                app_id: format!("{family_name}!{}", app.id),
+                icon_path: app.icon_path,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.dedup_by(|a, b| a.app_id == b.app_id);
+    out
+}
+
+/// Nama yang bisa dibaca dari nama paket, mis.
+/// `Microsoft.WindowsCalculator` → `Windows Calculator`.
+#[cfg(windows)]
+fn package_display_name(pkg_name: &str) -> String {
+    let tail = pkg_name.rsplit('.').next().unwrap_or(pkg_name);
+    let mut out = String::with_capacity(tail.len() + 4);
+    let mut prev_lower = false;
+    for ch in tail.chars() {
+        if ch.is_uppercase() && prev_lower {
+            out.push(' ');
+        }
+        prev_lower = ch.is_lowercase() || ch.is_ascii_digit();
+        out.push(ch);
+    }
+    if out.trim().is_empty() {
+        pkg_name.to_string()
+    } else {
+        out
+    }
+}
+
+#[cfg(windows)]
+struct ManifestApp {
+    id: String,
+    name: String,
+    icon_path: Option<String>,
+}
+
+/// Parser minimal untuk `AppxManifest.xml`.
+///
+/// Manifest memakai namespace XML, jadi parser generik akan merepotkan. Yang
+/// dibutuhkan hanya `<Application Id=...>` beserta `DisplayName` dan
+/// `Square44x44Logo` di dalamnya, sehingga pencarian string sudah cukup dan
+/// tidak menambah dependensi.
+#[cfg(windows)]
+fn parse_manifest_apps(xml: &str, root_folder: &str) -> Vec<ManifestApp> {
+    let mut out = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find("<Application ") {
+        let tail = &rest[start..];
+        let Some(end) = tail.find("</Application>") else {
+            break;
+        };
+        let block = &tail[..end];
+        rest = &tail[end + "</Application>".len()..];
+
+        // Hanya aplikasi yang punya Executable (bukan sekadar background task).
+        if !block.contains("Executable=") {
+            continue;
+        }
+        let Some(id) = attr(block, "Id=") else {
+            continue;
+        };
+        // DisplayName bisa berupa referensi resource (`ms-resource:...`); pemanggil
+        // yang memutuskan fallback bila tidak bisa ditampilkan apa adanya.
+        let name = attr(block, "DisplayName=").unwrap_or_else(|| id.clone());
+        let icon_path = attr(block, "Square44x44Logo=").map(|rel| {
+            let rel = rel.replace('/', "\\");
+            format!("{root_folder}\\{rel}")
+        });
+        out.push(ManifestApp {
+            id,
+            name,
+            icon_path,
+        });
+    }
+    out
+}
+
+/// Ambil nilai atribut XML sederhana, mis. `Id="App"` → `App`.
+#[cfg(windows)]
+fn attr(block: &str, key: &str) -> Option<String> {
+    let start = block.find(key)? + key.len();
+    let rest = &block[start..];
+    let quote = rest.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let body = &rest[1..];
+    let end = body.find(quote)?;
+    Some(body[..end].to_string())
+}
+
+/// Luncurkan aplikasi Microsoft Store lewat AppUserModelID.
+#[cfg(windows)]
+pub fn launch_store_app(app_id: &str) -> Result<(), String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{
+        ApplicationActivationManager, IApplicationActivationManager, AO_NONE,
+    };
+
+    let wide: Vec<u16> = app_id.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let should_uninit = hr.is_ok();
+        let result = (|| -> Result<(), String> {
+            let manager: IApplicationActivationManager =
+                CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| format!("activation manager: {e}"))?;
+            manager
+                .ActivateApplication(PCWSTR(wide.as_ptr()), &HSTRING::new(), AO_NONE)
+                .map_err(|e| format!("activate: {e}"))?;
+            Ok(())
+        })();
+        if should_uninit {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+/// Ikon aplikasi Store: pakai file logo dari paket, fallback ke ekstraksi
+/// ikon biasa bila file tidak ada.
+///
+/// Manifest biasanya menunjuk nama dasar (`Assets\AppList.png`) sementara paket
+/// hanya menyimpan varian skala (`AppList.targetsize-256.png`), jadi nama dasar
+/// itu perlu diresolusi dulu.
+#[cfg(windows)]
+pub fn store_app_icon_png(icon_path: Option<&str>) -> Option<Vec<u8>> {
+    let path = std::path::Path::new(icon_path?);
+    let resolved = resolve_logo_variant(path)?;
+    let bytes = std::fs::read(resolved).ok()?;
+    if bytes.len() > 64 {
+        Some(bytes)
+    } else {
+        None
+    }
+}
+
+/// Cari varian logo terbesar yang tersedia untuk nama dasar dari manifest.
+#[cfg(windows)]
+fn resolve_logo_variant(base: &std::path::Path) -> Option<std::path::PathBuf> {
+    if base.is_file() {
+        return Some(base.to_path_buf());
+    }
+    let dir = base.parent()?;
+    let stem = base.file_stem()?.to_str()?;
+    let entries = std::fs::read_dir(dir).ok()?;
+
+    // Pilih skala terbesar; `targetsize-*` = ukuran piksel, `scale-*` = kelipatan.
+    let mut best: Option<(u32, std::path::PathBuf)> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix(stem) else {
+            continue;
+        };
+        // Hanya varian dari file ini (`AppList.targetsize-256.png`), bukan
+        // file lain yang kebetulan berawalan sama.
+        let Some(rest) = rest.strip_prefix('.') else {
+            continue;
+        };
+        if !rest.ends_with(".png") || rest.contains("_altform-light") {
+            continue;
+        }
+        let score = rest
+            .strip_prefix("targetsize-")
+            .and_then(|r| r.split('.').next())
+            .and_then(|r| r.parse::<u32>().ok())
+            .map(|s| s * 10)
+            .or_else(|| {
+                rest.strip_prefix("scale-")
+                    .and_then(|r| r.split('.').next())
+                    .and_then(|r| r.parse::<u32>().ok())
+                    .map(|s| s * 100)
+            })
+            .unwrap_or(0);
+        if best.as_ref().map_or(true, |(b, _)| score > *b) {
+            best = Some((score, entry.path()));
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
 /// Buka file/folder dengan aplikasi default (Windows `ShellExecuteW`).
 /// Tidak lewat `cmd /C start`, jadi path dengan `&`, `%`, kutip, dsb. aman.
 #[cfg(windows)]
@@ -319,6 +569,21 @@ pub fn send_paste() -> bool {
 #[cfg(not(windows))]
 /// Platform lain belum diimplementasi di fase ini.
 pub fn extract_icon_png(_path: &str) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn list_store_apps() -> Vec<StoreApp> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+pub fn launch_store_app(_app_id: &str) -> Result<(), String> {
+    Err("Microsoft Store apps are only supported on Windows".into())
+}
+
+#[cfg(not(windows))]
+pub fn store_app_icon_png(_icon_path: Option<&str>) -> Option<Vec<u8>> {
     None
 }
 
