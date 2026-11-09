@@ -127,6 +127,45 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 - Linux and macOS builds (the `sun-platform` abstraction is kept clean so a port stays
   possible; Windows remains the only supported target for now)
 
+### Backlog ideas (ordered easiest first)
+
+Not committed work. Ordered by implementation cost; see the two blockers below before starting
+anything that needs the network.
+
+| # | Idea | Notes |
+|:--:|---|---|
+| 1 | **Quick web search** | Append `?` to open the query in a browser. `shell_open` already exists, and Sunny itself makes no request, so the network policy is untouched. |
+| 2 | **Lorem ipsum generator** | Pure `sun-core` module, no dependencies. |
+| 3 | **System commands** | Lock, shutdown, restart, sleep. Small surface, but destructive actions need an explicit confirmation step. |
+| 4 | **Windows & Control Panel settings search** | No enumerable API for `ms-settings:`; the page list must be curated by hand. Data work, not code work. |
+| 5 | **QR code generator** | Needs a QR crate; custom styling (colors, module shape, center logo) means rendering SVG directly. |
+| 6 | **Currency conversion and world clock** | World clock is pure timezone math. Currency needs an API, caching, and a parser for `1 usd to rupiah`. Free rate sources are typically daily, not real-time. |
+
+### Blockers for network-backed ideas
+
+1. **Network policy.** `AGENTS.md` forbids network calls other than the update check. Currency
+   conversion needs a documented allowlist, CSP restrictions (currently `csp: null`), timeouts,
+   offline caching, and a decision about whether user queries may leave the machine — that is a
+   privacy change for a project that advertises no telemetry.
+2. **Long-running job subsystem.** Only the updater reports progress today. Future background
+   work needs progress, cancellation, and cleanup instead of ad-hoc threads.
+
+### Refactor queues ahead of the backlog
+
+- `refresh()` in `main.js` is a five-branch `if/else` chain. Each answer type added inline makes it
+  harder to test; introduce an answer-provider abstraction before adding a third provider.
+- Releases are built and signed locally because GitHub Actions is blocked on an account billing
+  issue. Restore CI before the release cadence grows.
+
+### Considered and rejected
+
+- **Internet speed test** — rejected. Needs external servers, careful throughput measurement, and a
+  steady-state UI that does not fit a query-driven launcher.
+- **YouTube download with FFMPEG** — rejected. It requires bundling FFMPEG (installer would grow
+  from ~3.4 MB to roughly 80–120 MB, undermining the project's stated size), depends on a
+  constantly breaking extraction tool, and downloading from YouTube conflicts with its terms of
+  service for a public repository.
+
 ## Release v1.0.5 — Search Files command
 
 - With **Include Files in Root Search** enabled, the **Search Files** command no longer appears
