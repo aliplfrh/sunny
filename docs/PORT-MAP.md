@@ -26,9 +26,9 @@ Upstream structure (shallow clone in `reference/vicinae`, as of Nov 2026):
 | `crates/sun-core: fuzzy` | `src/lib/fuzzy` | Map behavior to `SkimMatcherV2` (`fuzzy-matcher`) — ✅ initial scaffold |
 | `crates/sun-core: apps` | app service (app scanner/launcher) | Windows: enumerate Start Menu .lnk files — ✅ initial scaffold |
 | `crates/sun-core: calculator` | `src/lib/soulver` (Soulver backend) | Rust: `meval`/`evalexpr` for Phase 1 |
-| `crates/sun-core: settings` | settings/config service | Windows: JSON at `%LOCALAPPDATA%\Sunny`, applied via Tauri — ✅ |
-| `crates/sun-core: snippets` | `src/snippet` | Phase 2 |
-| `crates/sun-core: file-indexer` | `src/file-indexer` | Phase 2 (file search) |
+| `crates/sun-core: settings` | settings/config service | Windows: JSON at `%LOCALAPPDATA%\Sunny`, single-instance guard, debounced UI writes — ✅ |
+| `crates/sun-core: snippets` | `src/snippet` | Out of scope (dropped for Phase 2) |
+| `crates/sun-core: file-indexer` | `src/file-indexer` | Windows: background recursive scan of user folders + fuzzy name search — ✅ (MVP; no USN journal yet) |
 | `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows via `windows-rs`; Linux to follow (Wayland/X11) |
 | Extension IPC | `src/lib/vicinae-ipc` | Sunny's own IPC system (lighter design) |
 | Extension runtime | `src/lib/figura`, `src/typescript` | **Phase 3** — evaluate Node sidecar vs. QuickJS |

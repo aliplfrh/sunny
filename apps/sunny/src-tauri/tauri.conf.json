@@ -20,7 +20,7 @@
         "skipTaskbar": true,
         "center": true,
         "resizable": false,
-        "visible": true
+        "visible": false
       }
     ],
     "security": {

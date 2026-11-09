@@ -38,18 +38,26 @@ Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
 - [x] **Emoji picker** — 1,870 entries generated from gemoji (MIT)
   - [x] `:` prefix enters emoji mode; search by English name + extra keywords
   - [x] Enter copies the emoji
-- [x] **Search-only commands** — internal commands (Clipboard History, Emoji Picker) are no longer
-      pinned to the default list; they appear only when searched
+- [x] **Search-only commands** — internal commands (Clipboard History, Emoji Picker, Search Files,
+      Settings) are no longer pinned to the default list; they appear only when searched
 - [x] **Branding** — Sunny logo pack wired in: multi-size `.ico` (app icon), custom tray icon, UI logo
+- [x] **File search** (Raycast-style "Search Files")
+  - [x] Background index of the user profile (Desktop, Documents, Downloads, Pictures, Music,
+        Videos + home) with depth/size limits and skipped dev/system folders
+  - [x] Fuzzy name matching (`SkimMatcherV2`) with path fallback, top 60 results
+  - [x] Dedicated file mode: type-aware folder/file glyphs, parent path in the row, live indexing state
+  - [x] `Enter` opens with the default app; `Ctrl+R` reveals the file in File Explorer
+  - [x] Index built once per launch on a background thread; UI never blocks on disk IO
 - [x] **Settings** (Raycast/Sonora-inspired), persisted to `%LOCALAPPDATA%\Sunny\settings.json`
   - [x] General: Open at Login (`HKCU\...\Run`), Show in System Tray, Sunny Hotkey
         (click-to-capture, requires a modifier, re-registers the global shortcut)
   - [x] Appearance: Font — **Sonora (Inter)** default or System; Font size 12–20 px
-  - [x] Window: Opacity 40–100 % (native layered window), Blur UI (in-page frosted layer),
-        Window mode — **Raycast Compact** / **Raycast Expanded**
+  - [x] Window: Opacity 40–100 % — **background only** (desktop snapshot + tint; text/icons stay
+        opaque), Blur UI (blurs the snapshot), Window mode — **Raycast Compact** / **Raycast Expanded**
   - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
+  - [x] Reliable persistence: single-instance guard (no competing writers) and pending-save flush
+        when the panel closes or the window hides
 - [ ] Text expander / snippet — *intentionally dropped (out of scope for this phase)*
-- [ ] File search (fast index like Everything/ripgrep)
 - [ ] Window switcher
 
 ## Phase 3 — Extension System ⏭️

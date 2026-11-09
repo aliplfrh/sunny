@@ -41,6 +41,10 @@
   /* Skala tipografi tunggal — diatur oleh setelan "Font size". */
   --fs: 14px;
   --font-ui: "Sonora Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+
+  /* Alpha tint latar. 100% = gelap penuh, 40% = desktop tembus paling kuat.
+     Elemen di atas sheet tidak pernah ikut memudar. */
+  --bg-tint: 0.9;
 }
 
 /* Pilihan font "System" membatalkan Inter. */
@@ -73,26 +77,31 @@ body {
   color: var(--text);
 }
 
-/* ── Blur UI (dekoratif, di dalam halaman) ─────────────────────────────
-   Jendela tetap opaque; lapisan gradien ini yang "diblur" oleh sheet
-   translusen, jadi efeknya tidak bergantung pada compositing OS. */
-body.blur-ui {
-  background:
-    radial-gradient(1100px 640px at 18% -10%, rgba(240, 140, 40, 0.24), transparent 62%),
-    radial-gradient(900px 560px at 105% 110%, rgba(90, 110, 255, 0.18), transparent 58%),
-    linear-gradient(160deg, #1c1c24 0%, #101014 100%);
+/* ── Backdrop desktop (snapshot layar) ────────────────────────────────
+   Snapshot diambil backend saat jendela tersembunyi. Opacity mengubah
+   alpha tint gelap di `.sheet` saja, jadi teks/ikon/tombol tetap pekat —
+   hanya latar yang memudar (perilaku yang diminta). */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-color: #131318;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.001);
 }
-body.blur-ui .sheet {
-  background: rgba(20, 20, 26, 0.62);
-  backdrop-filter: blur(22px) saturate(1.18);
-  -webkit-backdrop-filter: blur(22px) saturate(1.18);
+body.blur-ui .backdrop {
+  filter: blur(20px) saturate(1.15);
+  transform: scale(1.08);
 }
 
 .sheet {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: transparent;
+  background: rgba(18, 18, 21, var(--bg-tint));
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   overflow: hidden;
@@ -179,6 +188,21 @@ body.blur-ui .sheet {
 .item .icon.emoji {
   font-size: calc(var(--fs) * 1.29);
   background: transparent;
+}
+
+/* Ikon file/folder: emoji sistem, tanpa ekstraksi ikon (biar tetap ringan). */
+.item .icon.file {
+  font-size: calc(var(--fs) * 1.14);
+  background: transparent;
+}
+.item .sub.file-path {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 52%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 
 .item .name.clip {

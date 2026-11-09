@@ -16,8 +16,9 @@ const settingsEl = document.getElementById("settings");
 const settingsBodyEl = document.getElementById("settingsBody");
 const settingsBackEl = document.getElementById("settingsBack");
 const settingsSavedEl = document.getElementById("settingsSaved");
+const backdropEl = document.getElementById("backdrop");
 
-let mode = "apps"; // "apps" | "emoji" | "clip"
+let mode = "apps"; // "apps" | "emoji" | "clip" | "files"
 let settingsOpen = false;
 let capturingHotkey = false;
 
@@ -55,12 +56,19 @@ let paused = false; // watcher pause?
 let clipType = "all"; // filter dropdown: "all" | "text"
 let clipTotal = 0; // jumlah entri sebelum difilter (untuk "74 items")
 
+// ── State khusus mode file ──
+let fileIndexReady = false;
+let fileTotal = 0;
+let refreshSeq = 0; // penjaga balapan hasil pencarian async
+
 // Perintah internal — hanya muncul saat dicari (bukan di daftar default).
 const COMMANDS = [
   { kind: "cmd", cmd: "clip", icon: "📋", name: "Clipboard History",
     keys: "clipboard history riwayat clipboard papan klip" },
   { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker",
     keys: "emoji picker emotikon" },
+  { kind: "cmd", cmd: "files", icon: "📁", name: "Search Files",
+    keys: "search files file folder find dokument dokumen berkas" },
   { kind: "cmd", cmd: "settings", icon: "⚙️", name: "Settings",
     keys: "settings preferences setelan pengaturan" },
 ];
@@ -69,8 +77,32 @@ const MODE_LABEL = {
   apps: "Search apps…",
   emoji: "Search emoji…",
   clip: "Browse clipboard history…",
+  files: "Search files and folders…",
 };
 queryEl.placeholder = MODE_LABEL[mode];
+
+/* ── Backdrop desktop (untuk opacity background-only) ──── */
+
+function setBackdrop(url) {
+  if (!url) return;
+  backdropEl.style.backgroundImage = `url("${url}")`;
+}
+let backdropFresh = false;
+// Saat start, snapshot mungkin belum selesai diambil → coba beberapa kali.
+let backdropTries = 0;
+function loadBackdrop() {
+  invoke("backdrop_get")
+    .then((url) => {
+      if (url) setBackdrop(url);
+      else if (backdropTries++ < 8) setTimeout(loadBackdrop, 250);
+    })
+    .catch(() => {});
+}
+loadBackdrop();
+listen("sunny:backdrop", (e) => {
+  backdropFresh = true;
+  setBackdrop(e.payload);
+});
 
 function hideWindow() {
   invoke("hide_main_window");
@@ -126,6 +158,38 @@ function clipTitle(c) {
 
 /* ── Ikon baris hasil ──────────────────────────────────── */
 
+const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff"];
+const VIDEO_EXT = ["mp4", "mkv", "mov", "avi", "webm", "wmv", "m4v"];
+const AUDIO_EXT = ["mp3", "wav", "flac", "m4a", "ogg", "aac", "wma"];
+const DOC_EXT = ["pdf", "doc", "docx", "txt", "md", "rtf", "odt", "pages"];
+const SHEET_EXT = ["xls", "xlsx", "csv", "ods", "numbers"];
+const ARCHIVE_EXT = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz"];
+const CODE_EXT = ["rs", "js", "ts", "tsx", "jsx", "py", "go", "c", "cpp", "h", "java", "json", "toml", "yaml", "yml", "html", "css", "sh", "ps1"];
+
+function fileGlyph(item) {
+  if (item.is_dir) return "📁";
+  const ext = (item.name.split(".").pop() || "").toLowerCase();
+  if (IMAGE_EXT.includes(ext)) return "🖼";
+  if (VIDEO_EXT.includes(ext)) return "🎬";
+  if (AUDIO_EXT.includes(ext)) return "🎵";
+  if (ext === "pdf") return "📕";
+  if (SHEET_EXT.includes(ext)) return "📊";
+  if (DOC_EXT.includes(ext)) return "📄";
+  if (ARCHIVE_EXT.includes(ext)) return "🗜";
+  if (CODE_EXT.includes(ext)) return "🧾";
+  if (["exe", "msi", "bat", "cmd", "lnk"].includes(ext)) return "⚙";
+  return "📄";
+}
+
+/** Folder induk, dengan home dipendekkan menjadi "~" ala Raycast. */
+function parentDir(path) {
+  const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  const dir = i > 0 ? path.slice(0, i) : path;
+  const user = dir.match(/^[A-Za-z]:\\Users\\[^\\]+/);
+  if (user) return "~" + dir.slice(user[0].length);
+  return dir;
+}
+
 function iconElFor(item) {
   const icon = document.createElement("div");
   icon.className = "icon";
@@ -140,6 +204,9 @@ function iconElFor(item) {
   } else if (item.kind === "clip") {
     icon.classList.add(item.kind === "clip" && item.kind2 === "image" ? "type-image" : "type-text");
     icon.textContent = item.kind2 === "image" ? "🖼" : "T";
+  } else if (item.kind === "file") {
+    icon.classList.add("file");
+    icon.textContent = fileGlyph(item);
   } else if (item.icon) {
     const img = document.createElement("img");
     img.src = item.icon;
@@ -215,6 +282,13 @@ function renderFooter() {
       <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
       <span><kbd>↵</kbd> copy</span>
       <span><kbd>⌫</kbd> back</span>`;
+  } else if (mode === "files") {
+    hintsEl.innerHTML = `
+      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Search Files</span>
+      <span class="spacer"></span>
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>Ctrl</kbd><kbd>R</kbd> reveal in Explorer</span>
+      <span><kbd>⌫</kbd> back</span>`;
   } else {
     hintsEl.innerHTML = `
       <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
@@ -244,6 +318,10 @@ function render() {
     div.textContent =
       isClip ? (clipTotal ? "Nothing matches the filter." : "Clipboard history is empty.")
       : mode === "emoji" ? "No matching emoji."
+      : mode === "files" ? (!fileIndexReady
+          ? "Indexing your files in the background…"
+          : (fileTotal ? (queryEl.value ? "No matching files or folders." : "Type to search files and folders.")
+                       : "No files were found to index."))
       : queryEl.value ? "Nothing matches."
       : "Sunny is ready. Type an app name, an expression (12*7), ':' for emoji, or search a command.";
     listEl.appendChild(div);
@@ -278,6 +356,12 @@ function render() {
       t.className = "time";
       t.textContent = relTime(item.id);
       row.appendChild(t);
+    } else if (item.kind === "file") {
+      const sub = document.createElement("div");
+      sub.className = "sub file-path";
+      sub.textContent = parentDir(item.path);
+      sub.title = item.path;
+      row.appendChild(sub);
     } else {
       const sub = document.createElement("div");
       sub.className = "sub";
@@ -314,6 +398,9 @@ function render() {
 
 function applyAppearance() {
   document.documentElement.style.setProperty("--fs", SETTINGS.font_size + "px");
+  // Opacity = alpha tint background saja. Teks/ikon di atas sheet tetap pekat.
+  const pct = Math.min(100, Math.max(40, Number(SETTINGS.opacity) || 100));
+  document.documentElement.style.setProperty("--bg-tint", (pct / 100).toFixed(2));
   document.body.classList.toggle("font-system", SETTINGS.font === "system");
   document.body.classList.toggle("blur-ui", !!SETTINGS.blur_ui);
   document.body.classList.toggle("compact", SETTINGS.window_mode === "compact");
@@ -571,14 +658,14 @@ function renderSettings() {
     settingsSection("Window", [
       settingsRow(
         "Opacity",
-        "Overall window transparency.",
+        "Background opacity. Text, icons, and controls stay fully opaque.",
         sliderControl(SETTINGS.opacity, 40, 100, (v) =>
           onSettingChange({ opacity: v })
         )
       ),
       settingsRow(
         "Blur UI",
-        "Frosted-glass backdrop behind the launcher.",
+        "Blur the desktop backdrop behind the launcher.",
         toggleControl(SETTINGS.blur_ui, (v) =>
           onSettingChange({ blur_ui: v }, true)
         )
@@ -609,6 +696,7 @@ function openSettings() {
 }
 
 function closeSettings() {
+  flushPendingSave();
   settingsOpen = false;
   capturingHotkey = false;
   document.body.classList.remove("settings-open");
@@ -642,6 +730,14 @@ async function saveSettings() {
   }
 }
 
+/** Simpan segera perubahan yang masih menunggu debounce (mis. saat panel ditutup). */
+function flushPendingSave() {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  saveSettings();
+}
+
 function onSettingChange(patch, immediate = false) {
   Object.assign(SETTINGS, patch);
   SETTINGS_ERROR = "";
@@ -655,8 +751,14 @@ function onSettingChange(patch, immediate = false) {
   }
 
   clearTimeout(saveTimer);
-  if (immediate) return saveSettings();
-  saveTimer = setTimeout(saveSettings, 300);
+  if (immediate) {
+    saveTimer = null;
+    return saveSettings();
+  }
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveSettings();
+  }, 300);
   return Promise.resolve("");
 }
 
@@ -676,6 +778,7 @@ const fuzzy = (needle, hay) => {
 
 async function refresh() {
   if (settingsOpen) return;
+  const seq = ++refreshSeq;
   const raw = queryEl.value;
   const q = raw.trim();
 
@@ -717,6 +820,12 @@ async function refresh() {
       kind: "clip",
       kind2: c.kind || "text",
     })));
+  } else if (mode === "files") {
+    const res = await invoke("search_files", { query: q });
+    if (seq !== refreshSeq) return;
+    fileIndexReady = !!res.ready;
+    fileTotal = res.total || 0;
+    items.push(...res.items.map((hit) => ({ ...hit.item, kind: "file" })));
   } else {
     // mode apps — hasil kalkulator di urutan pertama bila kueri valid
     if (q) {
@@ -737,6 +846,7 @@ async function refresh() {
     }
   }
 
+  if (seq !== refreshSeq) return;
   selected = 0;
   render();
 }
@@ -765,6 +875,9 @@ async function activate(i) {
   } else if (item.kind === "emoji") {
     await navigator.clipboard?.writeText(item.emoji).catch(() => invoke("copy_to_clipboard", { text: item.emoji }));
     hideWindow();
+  } else if (item.kind === "file") {
+    invoke("open_path", { path: item.path }).catch(() => {});
+    hideWindow();
   } else {
     invoke("run_app", { path: item.path });
     hideWindow();
@@ -773,6 +886,12 @@ async function activate(i) {
 
 /* ── Fokus otomatis ────────────────────────────────────── */
 listen("sunny:shown", () => {
+  // Event `sunny:backdrop` biasanya sudah membawa snapshot baru; fetch hanya
+  // bila event terlewat (mis. saat WebView belum selesai dimuat).
+  if (!backdropFresh) {
+    invoke("backdrop_get").then(setBackdrop).catch(() => {});
+  }
+  backdropFresh = false;
   if (!settingsOpen) queryEl.focus();
 });
 window.addEventListener("focus", () => {
@@ -780,10 +899,18 @@ window.addEventListener("focus", () => {
 });
 queryEl.focus();
 
+// Perubahan yang masih menunggu debounce tetap disimpan saat jendela
+// disembunyikan/ditutup — ini penyebab setelan kadang "hilang".
+window.addEventListener("blur", flushPendingSave);
+window.addEventListener("beforeunload", flushPendingSave);
+
 /* ── Data berubah di background → segarkan ─────────────── */
 listen("sunny:apps-updated", () => refresh());
 listen("sunny:clip-updated", () => {
   if (mode === "clip") refresh();
+});
+listen("sunny:files-updated", () => {
+  if (mode === "files") refresh();
 });
 /* Menu tray → buka panel Settings */
 listen("sunny:open-settings", () => openSettings());
@@ -853,6 +980,13 @@ window.addEventListener("keydown", (e) => {
     const item = items[selected];
     if (item?.kind === "clip") {
       invoke("copy_to_clipboard", { text: item.text }).then(hideWindow);
+    }
+  } else if (mode === "files" && e.ctrlKey && e.key.toLowerCase() === "r") {
+    // Tampilkan file terpilih di File Explorer.
+    e.preventDefault();
+    const item = items[selected];
+    if (item?.kind === "file") {
+      invoke("reveal_path", { path: item.path }).catch(() => {});
     }
   } else if (e.key === "Enter") {
     e.preventDefault();

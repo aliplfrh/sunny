@@ -30,7 +30,8 @@ mod windows_imp {
             );
             if ok == 0 {
                 return None;
-            }            let hicon = sfi.hIcon;
+            }
+            let hicon = sfi.hIcon;
             if hicon.is_invalid() {
                 return None;
             }
@@ -69,7 +70,10 @@ mod windows_imp {
         result
     }
 
-    unsafe fn bitmap_to_png(hdc: windows::Win32::Graphics::Gdi::HDC, hbm: windows::Win32::Graphics::Gdi::HBITMAP) -> Option<Vec<u8>> {
+    unsafe fn bitmap_to_png(
+        hdc: windows::Win32::Graphics::Gdi::HDC,
+        hbm: windows::Win32::Graphics::Gdi::HBITMAP,
+    ) -> Option<Vec<u8>> {
         // 1) Interogasi dimensi
         let mut bmi = BITMAPINFO::default();
         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
@@ -110,7 +114,15 @@ mod windows_imp {
         }
         let mut rgba = Vec::with_capacity(buf.len());
         for px in buf.chunks_exact(4) {
-            let a = if has_alpha { px[3] } else { if px[0]|px[1]|px[2] == 0 { 0 } else { 255 } };
+            let a = if has_alpha {
+                px[3]
+            } else {
+                if px[0] | px[1] | px[2] == 0 {
+                    0
+                } else {
+                    255
+                }
+            };
             rgba.extend_from_slice(&[px[2], px[1], px[0], a]);
         }
 
@@ -120,7 +132,9 @@ mod windows_imp {
             let mut encoder = png::Encoder::new(&mut out, w as u32, h as u32);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
-            let Ok(mut writer) = encoder.write_header() else { return None };
+            let Ok(mut writer) = encoder.write_header() else {
+                return None;
+            };
             if writer.write_image_data(&rgba).is_err() {
                 return None;
             }
@@ -128,10 +142,81 @@ mod windows_imp {
         let _ = std::io::sink().write_all(&[]); // diam: png sudah di-buffer out
         Some(out)
     }
+
+    /// Ambil snapshot area layar (fisik) → PNG RGBA. Dipakai sebagai backdrop
+    /// launcher agar opacity hanya memudarkan background, bukan teks/ikon.
+    pub fn capture_screen_png(x: i32, y: i32, w: i32, h: i32) -> Option<Vec<u8>> {
+        use windows::Win32::Graphics::Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+            ReleaseDC, SelectObject, SRCCOPY,
+        };
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        unsafe {
+            let screen = GetDC(None);
+            if screen.is_invalid() {
+                return None;
+            }
+            let mem = CreateCompatibleDC(Some(screen));
+            if mem.is_invalid() {
+                ReleaseDC(None, screen);
+                return None;
+            }
+            let bmp = CreateCompatibleBitmap(screen, w, h);
+            if bmp.is_invalid() {
+                let _ = DeleteDC(mem);
+                ReleaseDC(None, screen);
+                return None;
+            }
+            let old = SelectObject(mem, bmp.into());
+            let _ = BitBlt(mem, 0, 0, w, h, Some(screen), x, y, SRCCOPY);
+            let png = bitmap_to_png(screen, bmp);
+            let _ = SelectObject(mem, old);
+            let _ = DeleteObject(bmp.into());
+            let _ = DeleteDC(mem);
+            ReleaseDC(None, screen);
+            png
+        }
+    }
 }
 
 #[cfg(windows)]
-pub use windows_imp::extract_icon_png;
+pub use windows_imp::{capture_screen_png, extract_icon_png};
+
+/// Buka file/folder dengan aplikasi default (Windows `ShellExecuteW`).
+/// Tidak lewat `cmd /C start`, jadi path dengan `&`, `%`, kutip, dsb. aman.
+#[cfg(windows)]
+pub fn shell_open(path: &str) -> Result<(), String> {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let ret = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            PCWSTR(wide.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if ret.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("failed to open path (code {})", ret.0 as isize))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn shell_open(path: &str) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
 
 /// Nomor urut global clipboard Windows — naik setiap isi clipboard berubah.
 /// Dibandingkan antar-poll untuk mendeteksi perubahan tanpa isi membaca (murah).
@@ -159,7 +244,11 @@ pub fn send_paste() -> bool {
             ki: KEYBDINPUT {
                 wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
                 wScan: 0,
-                dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    Default::default()
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -185,28 +274,6 @@ pub fn send_paste() -> bool {
 pub fn extract_icon_png(_path: &str) -> Option<Vec<u8>> {
     None
 }
-
-/// Ubah opasitas jendela native (persen). Jendela tetap opaque — kita hanya
-/// memakai layered window + alpha byte, aman untuk WebView2 (tanpa compositing
-/// transparan yang tidak andal di mesin ini).
-#[cfg(windows)]
-pub fn set_window_opacity(hwnd: isize, percent: u32) {
-    use windows::Win32::Foundation::{COLORREF, HWND};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongW, SetLayeredWindowAttributes, SetWindowLongW, GWL_EXSTYLE, LWA_ALPHA,
-        WS_EX_LAYERED,
-    };
-    let h = HWND(hwnd as *mut core::ffi::c_void);
-    let alpha = ((percent.clamp(20, 100) * 255) / 100) as u8;
-    unsafe {
-        let ex = GetWindowLongW(h, GWL_EXSTYLE);
-        SetWindowLongW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as i32);
-        let _ = SetLayeredWindowAttributes(h, COLORREF(0), alpha, LWA_ALPHA);
-    }
-}
-
-#[cfg(not(windows))]
-pub fn set_window_opacity(_hwnd: isize, _percent: u32) {}
 
 /// Daftarkan/lepas Sunny di autostart user (`HKCU\...\Run`), tanpa admin.
 #[cfg(windows)]

@@ -8,5 +8,6 @@ pub mod apps;
 pub mod calc;
 pub mod clipboard;
 pub mod emoji;
+pub mod files;
 pub mod search;
 pub mod settings;
