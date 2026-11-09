@@ -58,7 +58,7 @@ timestamp, and checksum before you paste.
 - Pause recording at any time; history is capped and stored on disk
 
 <div align="center">
-  <img src="docs/assets/clipboard-history.png" alt="Clipboard history with preview and metadata" width="720" />
+  <img src="docs/assets/clipboard-hry.png" alt="Clipboard history with preview and metadata" width="720" />
 </div>
 
 ### 😀 Emoji picker
