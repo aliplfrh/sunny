@@ -95,4 +95,9 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 - Text expander / snippet
 - Extension system (Vicinae `.figura` runtime, Raycast extension compatibility, extension store)
 - AI chat / dictation
-- Linux and macOS builds
+
+## Planned Later
+
+- Window switcher
+- Linux and macOS builds (the `sun-platform` abstraction is kept clean so a port stays
+  possible; Windows remains the only supported target for now)

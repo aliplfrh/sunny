@@ -30,7 +30,8 @@
 
 ## Platform
 
-**Windows only.** Sunny targets Windows 10/11; Linux and macOS are out of scope.
+**Windows only for now.** Sunny targets Windows 10/11. Linux and macOS are planned later;
+the `sun-platform` crate keeps the OS-specific code isolated so a port stays possible.
 
 ## Build (Windows)
 
