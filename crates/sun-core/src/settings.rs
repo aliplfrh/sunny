@@ -77,13 +77,26 @@ impl Settings {
     }
 
     /// Simpan ke disk (best-effort, tidak mengganggu alur UI).
+    /// Ditulis ke file sementara lalu di-rename, supaya crash di tengah tulis
+    /// tidak meninggalkan settings.json setengah jadi (yang akan terbaca
+    /// sebagai default dan membuat setelan pengguna "hilang").
     pub fn save(&self) {
         let path = settings_path();
         if let Some(dir) = path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        if let Ok(data) = serde_json::to_vec_pretty(self) {
-            let _ = fs::write(&path, data);
+        let Ok(data) = serde_json::to_vec_pretty(self) else {
+            return;
+        };
+        let tmp = path.with_extension("json.tmp");
+        if fs::write(&tmp, &data).is_err() {
+            return;
+        }
+        // Windows: rename gagal bila target ada, jadi hapus dulu.
+        let _ = fs::remove_file(&path);
+        if fs::rename(&tmp, &path).is_err() {
+            let _ = fs::write(&path, &data);
+            let _ = fs::remove_file(&tmp);
         }
     }
 

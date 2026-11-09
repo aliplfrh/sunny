@@ -1059,6 +1059,10 @@ body.settings-window .settings-nav {
   width: 232px;
   padding: 16px 12px;
 }
+/* Titlebar sudah memuat judul + tombol tutup; header sidebar akan duplikat. */
+body.settings-window .settings-nav-head {
+  display: none;
+}
 body.settings-window .settings-body {
   padding: 20px 24px 24px;
 }

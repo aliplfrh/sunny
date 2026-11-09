@@ -1065,9 +1065,24 @@ async function checkForUpdates() {
     }
   } catch (err) {
     updateState = "error";
-    updateError = String(err).slice(0, 120);
+    updateError = friendlyUpdateError(err);
   }
   renderSettings();
+}
+
+/// Pesan error updater cukup teknis; terjemahkan kasus yang paling sering.
+function friendlyUpdateError(err) {
+  const raw = String(err || "");
+  if (/valid release JSON|404|not found/i.test(raw)) {
+    return "No published release found yet";
+  }
+  if (/network|connect|dns|timed? ?out/i.test(raw)) {
+    return "Network unavailable";
+  }
+  if (/signature/i.test(raw)) {
+    return "Update signature is invalid";
+  }
+  return raw.slice(0, 120) || "Update check failed";
 }
 
 async function installUpdate() {
@@ -1081,7 +1096,7 @@ async function installUpdate() {
     await window.__TAURI__.process.relaunch();
   } catch (err) {
     updateState = "error";
-    updateError = String(err).slice(0, 120);
+    updateError = friendlyUpdateError(err);
     renderSettings();
   }
 }
