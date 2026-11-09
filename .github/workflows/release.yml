@@ -83,6 +83,14 @@ jobs:
             }
           }
           $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path "latest.json" -Encoding utf8
+          # PowerShell 5.1 menulis BOM dengan -Encoding utf8; updater gagal
+          # men-decode JSON ber-BOM, jadi tulis ulang tanpa BOM.
+          $json = Get-Content latest.json -Raw
+          [System.IO.File]::WriteAllText(
+            (Join-Path (Get-Location) "latest.json"),
+            $json,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
           Get-Content latest.json
 
       - name: Publish release

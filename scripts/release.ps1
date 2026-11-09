@@ -50,7 +50,9 @@ $manifest = [ordered]@{
     }
 }
 $latestPath = Join-Path $root "latest.json"
-$manifest | ConvertTo-Json -Depth 6 | Set-Content $latestPath -Encoding utf8
+# Tulis tanpa BOM: updater gagal decode JSON yang diawali BOM.
+$json = $manifest | ConvertTo-Json -Depth 6
+[System.IO.File]::WriteAllText($latestPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host ""
 Write-Host "Installer : $($setup.FullName)" -ForegroundColor Green
