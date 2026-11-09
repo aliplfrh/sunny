@@ -43,7 +43,8 @@ jobs:
           "version=$($conf.version)" >> $env:GITHUB_OUTPUT
           $tag = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "v$($conf.version)" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
-          $releaseInfo = [ordered]@{ version = $conf.version; release_tag = $tag } | ConvertTo-Json
+          # Fixed layout so the generated metadata matches the committed file.
+          $releaseInfo = "{`n  `"version`": `"$($conf.version)`",`n  `"release_tag`": `"$tag`"`n}`n"
           [System.IO.File]::WriteAllText(
             (Join-Path (Get-Location) "apps/sunny/src-tauri/release-info.json"),
             $releaseInfo,

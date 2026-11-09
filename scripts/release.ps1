@@ -23,7 +23,8 @@ if (-not $Tag) { $Tag = "v$version" }
 
 # Build metadata is descriptive, never the source of the executable's SemVer.
 # The UI validates it against the running package version before showing the label.
-$releaseInfo = [ordered]@{ version = $version; release_tag = $Tag } | ConvertTo-Json
+# Written with a fixed layout so building never dirties the working tree.
+$releaseInfo = "{`n  `"version`": `"$version`",`n  `"release_tag`": `"$Tag`"`n}`n"
 [System.IO.File]::WriteAllText(
     (Join-Path $root "apps\sunny\src-tauri\release-info.json"),
     $releaseInfo,
