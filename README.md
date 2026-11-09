@@ -18,6 +18,7 @@
 | Auto-update — signed releases, in-app check & install | ✅ |
 | System tray icon | ✅ |
 | Window switcher | ⏭️ planned |
+| Linux and Mac Support | ⏭️ planned |
 
 ## Architecture
 
