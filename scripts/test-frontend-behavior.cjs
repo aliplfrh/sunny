@@ -480,3 +480,32 @@ test("each immediate setting caller receives its own failure rather than another
   assert.match(await failed, /Hotkey registration failed/);
   assert.equal(await succeeded, "");
 });
+
+test("Search Files command is hidden while root file search covers it", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [], search_files: { ready: true, total: 0, items: [] },
+  } });
+  const filesCommands = () => f.run('items.filter((item) => item.cmd === "files").length');
+
+  // Root file search is on, so a separate command would duplicate its Files section.
+  await f.search("fil");
+  assert.equal(filesCommands(), 0);
+  await f.search("search");
+  assert.equal(filesCommands(), 0);
+
+  // Typing the command's own name keeps it reachable.
+  await f.search("search files");
+  assert.equal(filesCommands(), 1);
+  await f.search("files");
+  assert.equal(filesCommands(), 1);
+
+  // With root file search off the command is the only route, so it always shows.
+  const off = await fixture({ settings: { include_files: false }, responses: { search_apps: [] } });
+  await off.search("fil");
+  assert.equal(off.run('items.filter((item) => item.cmd === "files").length'), 1);
+});
+
+test("file result count is labelled in files, not pixels", async () => {
+  assert.match(source, /function stepperControl\(start, min, max, onChange, unit = "px"\)/);
+  assert.match(source, /stepperControl\(SETTINGS\.file_results[\s\S]{0,160}?"files"/);
+});

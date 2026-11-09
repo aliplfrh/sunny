@@ -127,6 +127,14 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 - Linux and macOS builds (the `sun-platform` abstraction is kept clean so a port stays
   possible; Windows remains the only supported target for now)
 
+## Release v1.0.5 — Search Files command
+
+- With **Include Files in Root Search** enabled, the **Search Files** command no longer appears
+  for unrelated queries (it duplicated the Files section); it still appears when the query names
+  it, such as `search files` or `files`.
+- With root file search disabled, the command is always available.
+- The **File Results** stepper is labelled in files instead of pixels.
+
 ## Release v1.0.4 — Launcher UI fixes
 
 - Launcher home shows **Favorites** then **Suggestions**, ranked by successful launch

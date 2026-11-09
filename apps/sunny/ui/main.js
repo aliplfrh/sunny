@@ -726,15 +726,15 @@ function fontControl() {
   return sel;
 }
 
-function stepperControl(start, min, max, onChange) {
+function stepperControl(start, min, max, onChange, unit = "px") {
   let value = start;
   const wrap = el("div", "stepper");
-  const minus = el("button", null, "−");
+  const minus = el("button", null, "-");
   const plus = el("button", null, "+");
   const val = el("span", "val");
   minus.type = plus.type = "button";
   const sync = () => {
-    val.textContent = `${value} px`;
+    val.textContent = `${value} ${unit}`;
     minus.disabled = value <= min;
     plus.disabled = value >= max;
   };
@@ -1212,7 +1212,7 @@ function renderSettings(force = false) {
           "File Results",
           "How many file matches to show below Results in the main search.",
           stepperControl(SETTINGS.file_results, 0, 30, (v) =>
-            onSettingChange({ file_results: v }, true)
+            onSettingChange({ file_results: v }, true), "files"
           )
         ),
       ])
@@ -1636,6 +1636,17 @@ const fuzzy = (needle, hay) => {
   return true;
 };
 
+/* Commands are search-only. With root file search enabled, the dedicated
+   "Search Files" command would duplicate the Files section, so it only appears
+   when the query actually names it. */
+function filesCommandVisible(query) {
+  if (!SETTINGS.include_files) return true;
+  const text = String(query || "").toLowerCase().trim();
+  if (!text) return false;
+  return ["file", "files", "search files", "search file"].some((name) => text.includes(name));
+}
+
+/* Commands are shared by search and settings; keep this helper next to them. */
 async function refresh() {
   if (IS_SETTINGS_WINDOW || settingsOpen) return;
   const seq = ++refreshSeq;
@@ -1677,6 +1688,7 @@ async function refresh() {
       if (value != null) nextItems.push({ kind: "calc", expr: q, value, group: "Results" });
       const cmds = COMMANDS
         .filter((c) => fuzzy(q, c.keys))
+        .filter((c) => c.cmd !== "files" || filesCommandVisible(q))
         .map(({ keys, ...c }) => ({ ...c, group: "Results" }));
       const str = await invoke("search_apps", { query: q });
       if (seq !== refreshSeq) return;
