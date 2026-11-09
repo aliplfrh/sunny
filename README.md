@@ -1,6 +1,6 @@
 # Sunny
 
-*Sunny* is a fast, lightweight desktop launcher / command palette inspired by [Raycast](https://www.raycast.com/), and a full port of [Vicinae](https://github.com/vicinaehq/vicinae) (C++/Qt) to **Rust**. Press `Alt+Space` anywhere to summon it. Press `Ctrl+,` for Settings.
+*Sunny* is a fast, lightweight desktop launcher / command palette inspired by [Raycast](https://www.raycast.com/), and a Rust port of [Vicinae](https://github.com/vicinaehq/vicinae) (C++/Qt) core features. Press `Alt+Space` anywhere to summon it. Press `Ctrl+,` for Settings.
 
 ## Project Status
 
@@ -16,7 +16,6 @@
 | Settings — Open at Login, tray, hotkey, font (Sonora/Inter), size, background opacity, blur, window mode | ✅ |
 | System tray icon | ✅ |
 | Window switcher | ⏭️ planned |
-| Extension runtime (Vicinae `.figura`) | ⏭️ Phase 3 |
 
 ## Architecture
 
@@ -24,12 +23,11 @@
 |---|---|
 | `apps/sunny` | Tauri v2 application — web UI (Raycast-like interface) + Rust backend, global hotkey, tray |
 | `crates/sun-core` | Search engine (fuzzy), ranking, calculator, application index, file index, emoji, clipboard store, settings |
-| `crates/sun-platform` | Windows platform abstraction: global hotkey, window helpers, clipboard sequence, icon extraction, paste injection |
-| `crates/sun-extensions` | (Future phase) Extension runtime, Raycast API compatibility |
+| `crates/sun-platform` | Windows platform abstraction: global hotkey, window helpers, clipboard sequence, icon extraction, screen capture, paste injection |
 
 ## Platform
 
-**Windows** is prioritized first, followed by Linux and macOS.
+**Windows only.** Sunny targets Windows 10/11; Linux and macOS are out of scope.
 
 ## Build (Windows)
 

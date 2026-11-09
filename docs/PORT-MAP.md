@@ -29,10 +29,10 @@ Upstream structure (shallow clone in `reference/vicinae`, as of Nov 2026):
 | `crates/sun-core: settings` | settings/config service | Windows: JSON at `%LOCALAPPDATA%\Sunny`, single-instance guard, debounced UI writes — ✅ |
 | `crates/sun-core: snippets` | `src/snippet` | Out of scope (dropped for Phase 2) |
 | `crates/sun-core: file-indexer` | `src/file-indexer` | Windows: background recursive scan of user folders + fuzzy name search — ✅ (MVP; no USN journal yet) |
-| `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows via `windows-rs`; Linux to follow (Wayland/X11) |
-| Extension IPC | `src/lib/vicinae-ipc` | Sunny's own IPC system (lighter design) |
-| Extension runtime | `src/lib/figura`, `src/typescript` | **Phase 3** — evaluate Node sidecar vs. QuickJS |
-| Calendar & UI helpers | `src/lib/glyph`, `src/inference` | Phase 4 / as needed |
+| `crates/sun-platform` | `src/lib/linux-utils`, `xdgpp` (platform layer) | Windows via `windows-rs`; other platforms out of scope |
+| Extension IPC | `src/lib/vicinae-ipc` | Out of scope |
+| Extension runtime | `src/lib/figura`, `src/typescript` | Out of scope |
+| Calendar & UI helpers | `src/lib/glyph`, `src/inference` | Out of scope |
 
 ## Porting prohibitions
 - Do not copy the Qt actor architecture (`QObject`/signal-slot) 1:1 — use Rust's built-in channels and `tokio`/`async`.
@@ -41,6 +41,6 @@ Upstream structure (shallow clone in `reference/vicinae`, as of Nov 2026):
 - Keep it as a *design and behavior* reference — not an art copy.
 
 ## Next steps
-1. Shallow-clone Vicinae → `reference/vicinae` (read-only, gitignored)
-2. Catalog the `src/` and `figura/` structures to complete this map
-3. Scaffold the Cargo workspace + Tauri
+1. Window switcher (the last planned Phase 2 feature)
+2. Optional clipboard image capture
+3. Polish: ranking by frequency/recency

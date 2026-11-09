@@ -1,11 +1,11 @@
 # Sunny Roadmap
 
-Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
+Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
 ## Phase 0 — Foundation ✅
-- [x] License decision: full port → GPL-3.0 (with NOTICE attribution to Vicinae)
+- [x] License decision: port of Vicinae core features → GPL-3.0 (with NOTICE attribution to Vicinae)
 - [x] UI stack decision: Tauri v2 (WebView2) for a Raycast-like appearance
-- [x] Platform decision: Windows first
+- [x] Platform decision: Windows only
 - [x] Repo, LICENSE, NOTICE, README, ROADMAP, PORT-MAP
 - [x] Scaffold Cargo workspace (`crates/sun-core`, `crates/sun-platform`)
 - [x] Scaffold Tauri application (`apps/sunny`, opaque overlay window)
@@ -57,23 +57,19 @@ Full port of Vicinae (C++23/Qt) → Rust + Tauri v2. Windows-first, GPL-3.0.
   - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
   - [x] Reliable persistence: single-instance guard (no competing writers) and pending-save flush
         when the panel closes or the window hides
-- [ ] Text expander / snippet — *intentionally dropped (out of scope for this phase)*
 - [ ] Window switcher
-
-## Phase 3 — Extension System ⏭️
-- [ ] Design Sunny's own extension API
-- [ ] Runtime for Vicinae `.figura` extensions (mapped from the upstream `figura/` runtime)
-- [ ] Compatibility with a subset of Raycast script commands
-- [ ] (Optional/gradual) Raycast React extension compatibility
-
-## Phase 4 — Feature Parity with Vicinae ⏭️
-- [ ] Extension store
-- [ ] AI chat / dictation (integration stub)
-- [ ] Volume control, font browser, etc.
-- [ ] Linux (wlr/X11) and macOS
 
 ## Porting Principles
 1. **The UI is rewritten, not translated**: QML → Raycast-like web UI; C++ logic → idiomatic Rust (safe, without line-by-line 1:1 equivalence).
 2. **Vicinae references are mapped** in `docs/PORT-MAP.md` — each module lists its upstream source file.
-3. **Windows first**, with abstractions in `sun-platform` so Linux/macOS can follow without a major refactor.
+3. **Windows only**, with abstractions in `sun-platform` kept clean for maintainability.
 4. Each phase must deliver a *usable* application, not a half-finished one.
+
+## Out of Scope
+Sunny is a focused, lightweight launcher. The following upstream Vicinae features are
+**not planned**:
+
+- Text expander / snippet
+- Extension system (Vicinae `.figura` runtime, Raycast extension compatibility, extension store)
+- AI chat / dictation
+- Linux and macOS builds
