@@ -35,18 +35,35 @@
       </div>
 
       <section class="settings" id="settings" hidden>
-        <header class="settings-head">
-          <button class="icon-btn" id="settingsBack" type="button" title="Back (Esc)">‹</button>
-          <span class="settings-title">Settings</span>
-          <span class="spacer"></span>
-          <span class="settings-saved" id="settingsSaved"></span>
-        </header>
-        <div class="settings-body" id="settingsBody"></div>
-        <footer class="hints settings-foot">
-          <span><kbd>Esc</kbd> back</span>
-          <span class="spacer"></span>
-          <span class="settings-note">Changes are saved automatically</span>
-        </footer>
+        <aside class="settings-nav">
+          <div class="settings-nav-head">
+            <button class="icon-btn" id="settingsBack" type="button" title="Back (Esc)">‹</button>
+            <span class="settings-title">Settings</span>
+          </div>
+          <div class="settings-search">
+            <span class="settings-search-ico" aria-hidden="true">⌕</span>
+            <input
+              id="settingsSearch"
+              class="settings-search-input"
+              type="text"
+              placeholder="Search settings…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <nav class="settings-tabs" id="settingsTabs" role="tablist" aria-label="Settings sections"></nav>
+          <div class="settings-nav-foot">
+            <span class="settings-saved" id="settingsSaved"></span>
+          </div>
+        </aside>
+        <div class="settings-main">
+          <div class="settings-body" id="settingsBody" role="tabpanel"></div>
+          <footer class="hints settings-foot">
+            <span><kbd>Esc</kbd> back</span>
+            <span class="spacer"></span>
+            <span class="settings-note">Changes are saved automatically</span>
+          </footer>
+        </div>
       </section>
 
       <main class="body">

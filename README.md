@@ -13,7 +13,7 @@
 | Emoji picker (`:` prefix, 1,870 emoji) | ✅ |
 | Clipboard history (master–detail, metadata, pause, paste to active window) | ✅ |
 | File search — fuzzy index of your files, open or reveal in Explorer | ✅ |
-| Settings — Open at Login, tray, hotkey, font (Sonora/Inter), size, background opacity, blur, window mode | ✅ |
+| Settings — tabbed panel (General, Launcher, Shortcuts, Keyboard, Advanced, About) with search | ✅ |
 | System tray icon | ✅ |
 | Window switcher | ⏭️ planned |
 

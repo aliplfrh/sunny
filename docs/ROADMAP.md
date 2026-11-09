@@ -49,11 +49,19 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
   - [x] `Enter` opens with the default app; `Ctrl+R` reveals the file in File Explorer
   - [x] Index built once per launch on a background thread; UI never blocks on disk IO
 - [x] **Settings** (Raycast/Sonora-inspired), persisted to `%LOCALAPPDATA%\Sunny\settings.json`
+  - [x] Tabbed panel with a Raycast-style sidebar: **General**, **Launcher**, **Shortcuts**,
+        **Keyboard**, **Advanced**, **About Sunny**, plus a settings search box
   - [x] General: Open at Login (`HKCU\...\Run`), Show in System Tray, Sunny Hotkey
         (click-to-capture, requires a modifier, re-registers the global shortcut)
-  - [x] Appearance: Font — **Sonora (Inter)** default or System; Font size 12–20 px
-  - [x] Window: Opacity 40–100 % — **background only** (desktop snapshot + tint; text/icons stay
-        opaque), Blur UI (blurs the snapshot), Window mode — **Raycast Compact** / **Raycast Expanded**
+  - [x] Launcher: Font — **Sonora (Inter)** default or System; Font size 12–20 px;
+        Opacity 40–100 % — **background only** (desktop snapshot + tint; text/icons stay
+        opaque); Blur UI (blurs the snapshot); Window mode — **Raycast Compact** /
+        **Raycast Expanded**; Show footer hints
+  - [x] Shortcuts: read-only reference of every global and in-launcher binding
+  - [x] Keyboard: Vim navigation (`Ctrl+J` / `Ctrl+K`), Backspace-to-app-search toggle,
+        configurable emoji prefix
+  - [x] Advanced: open the settings folder, reset all settings, file-index status and rebuild
+  - [x] About Sunny: version, license, bundled font, emoji data source, platform
   - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
   - [x] Reliable persistence: single-instance guard (no competing writers) and pending-save flush
         when the panel closes or the window hides

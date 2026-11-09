@@ -27,6 +27,14 @@ pub struct Settings {
     pub blur_ui: bool,
     /// "compact" (Raycast Compact) atau "expanded" (Raycast Expanded).
     pub window_mode: String,
+    /// Tampilkan baris petunjuk tombol di bawah launcher.
+    pub show_footer: bool,
+    /// Awalan untuk masuk mode emoji (default ":").
+    pub emoji_prefix: String,
+    /// Backspace saat kolom kosong kembali ke pencarian aplikasi.
+    pub backspace_back: bool,
+    /// Navigasi daftar dengan Ctrl+J / Ctrl+K (ala Vim).
+    pub vim_nav: bool,
 }
 
 impl Default for Settings {
@@ -40,6 +48,10 @@ impl Default for Settings {
             opacity: 100,
             blur_ui: false,
             window_mode: "expanded".into(),
+            show_footer: true,
+            emoji_prefix: ":".into(),
+            backspace_back: true,
+            vim_nav: false,
         }
     }
 }
@@ -79,6 +91,13 @@ impl Settings {
         if self.window_mode != "compact" {
             self.window_mode = "expanded".into();
         }
+        // Awalan emoji harus satu karakter yang tidak kosong.
+        let prefix: String = self.emoji_prefix.trim().chars().take(1).collect();
+        self.emoji_prefix = if prefix.is_empty() {
+            ":".into()
+        } else {
+            prefix
+        };
     }
 
     /// Tinggi jendela (logical px) untuk mode yang aktif.

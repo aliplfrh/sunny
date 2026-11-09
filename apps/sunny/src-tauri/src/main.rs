@@ -247,6 +247,24 @@ fn search_files(
     }
 }
 
+/// Bangun ulang indeks file di background (dipakai tombol "Rebuild").
+#[tauri::command]
+fn rebuild_file_index(app: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    if let Some(st) = app.try_state::<FileIndexState>() {
+        st.ready.store(false, Ordering::Relaxed);
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let files = sun_core::files::build_index();
+        if let Some(st) = handle.try_state::<FileIndexState>() {
+            *st.files.lock().unwrap() = files;
+            st.ready.store(true, Ordering::Relaxed);
+        }
+        let _ = handle.emit("sunny:files-updated", ());
+    });
+}
+
 /// Buka file dengan aplikasi default (ShellExecuteW; aman untuk semua nama file).
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
@@ -291,7 +309,8 @@ fn settings_resize(app: tauri::AppHandle, open: bool) {
         .store(open, Ordering::Relaxed);
     if let Some(window) = app.get_webview_window("main") {
         if open {
-            let _ = window.set_size(tauri::LogicalSize::new(720.0, 700.0));
+            // Panel Settings lebih lebar: sidebar tab + isi.
+            let _ = window.set_size(tauri::LogicalSize::new(820.0, 700.0));
             let _ = window.center();
         } else {
             let settings = app.state::<SettingsState>().0.lock().unwrap().clone();
@@ -304,6 +323,45 @@ fn settings_resize(app: tauri::AppHandle, open: bool) {
 #[tauri::command]
 fn settings_get(state: tauri::State<'_, SettingsState>) -> Settings {
     state.0.lock().unwrap().clone()
+}
+
+/// Kembalikan semua setelan ke default pabrik lalu simpan.
+#[tauri::command]
+fn settings_reset(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SettingsState>,
+) -> Result<Settings, String> {
+    let current = state.0.lock().unwrap().clone();
+    let mut next = Settings::default();
+    next.normalize();
+
+    if next.hotkey != current.hotkey {
+        let gs = app.global_shortcut();
+        let _ = gs.unregister(current.hotkey.as_str());
+        if let Err(e) = gs.register(next.hotkey.as_str()) {
+            let _ = gs.register(current.hotkey.as_str());
+            return Err(format!("Hotkey cannot be registered: {e}"));
+        }
+    }
+    if next.open_at_login != current.open_at_login {
+        sun_platform::set_autostart(next.open_at_login)?;
+    }
+    apply_tray(&app, next.show_in_tray);
+    apply_window_mode(&app, &next);
+    next.save();
+
+    *state.0.lock().unwrap() = next.clone();
+    let _ = app.emit("sunny:settings-updated", &next);
+    Ok(next)
+}
+
+/// Lokasi folder setelan (untuk tombol "Open settings folder").
+#[tauri::command]
+fn settings_dir() -> String {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
+        std::env::temp_dir().to_string_lossy().to_string()
+    });
+    format!("{base}\\Sunny")
 }
 
 /// Terapkan hanya efek visual (ukuran jendela) — dipakai saat slider/stepper
@@ -397,9 +455,12 @@ fn main() {
             emoji_all,
             backdrop_get,
             search_files,
+            rebuild_file_index,
             open_path,
             reveal_path,
             settings_get,
+            settings_reset,
+            settings_dir,
             settings_preview,
             settings_update,
             settings_resize

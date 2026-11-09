@@ -16,6 +16,8 @@ const settingsEl = document.getElementById("settings");
 const settingsBodyEl = document.getElementById("settingsBody");
 const settingsBackEl = document.getElementById("settingsBack");
 const settingsSavedEl = document.getElementById("settingsSaved");
+const settingsTabsEl = document.getElementById("settingsTabs");
+const settingsSearchEl = document.getElementById("settingsSearch");
 const backdropEl = document.getElementById("backdrop");
 
 let mode = "apps"; // "apps" | "emoji" | "clip" | "files"
@@ -32,6 +34,10 @@ let SETTINGS = {
   opacity: 100,
   blur_ui: false,
   window_mode: "expanded",
+  show_footer: true,
+  emoji_prefix: ":",
+  backspace_back: true,
+  vim_nav: false,
 };
 let SETTINGS_ERROR = "";
 let saveTimer = null;
@@ -404,6 +410,7 @@ function applyAppearance() {
   document.body.classList.toggle("font-system", SETTINGS.font === "system");
   document.body.classList.toggle("blur-ui", !!SETTINGS.blur_ui);
   document.body.classList.toggle("compact", SETTINGS.window_mode === "compact");
+  document.body.classList.toggle("no-footer", !SETTINGS.show_footer);
 }
 
 function el(tag, cls, text) {
@@ -611,76 +618,311 @@ function hotkeyControl() {
   return btn;
 }
 
+/* ── Tab panel Settings (ala Raycast) ──────────────────── */
+
+const SETTINGS_TABS = [
+  { id: "general", label: "General", icon: "⚙" },
+  { id: "launcher", label: "Launcher", icon: "🚀" },
+  { id: "shortcuts", label: "Shortcuts", icon: "⌨" },
+  { id: "keyboard", label: "Keyboard", icon: "⌘" },
+  { id: "advanced", label: "Advanced", icon: "🛠" },
+  { id: "about", label: "About Sunny", icon: "☀" },
+];
+
+let settingsTab = "general";
+let settingsFilter = "";
+
+/** Baris yang cocok dengan filter pencarian setelan. */
+function rowMatches(label, desc) {
+  if (!settingsFilter) return true;
+  const hay = `${label} ${desc || ""}`.toLowerCase();
+  return hay.includes(settingsFilter);
+}
+
+/** Bungkus baris; kembalikan null bila tersaring keluar. */
+function maybeRow(label, desc, control) {
+  return rowMatches(label, desc) ? settingsRow(label, desc, control) : null;
+}
+
+function settingsSectionFiltered(title, rows) {
+  const kept = rows.filter(Boolean);
+  if (!kept.length) return null;
+  return settingsSection(title, kept);
+}
+
+function textValue(text, mono = false) {
+  return el("span", "value" + (mono ? " mono" : ""), text);
+}
+
+/** Status indeks file yang selalu segar (dibaca ulang saat tab dibuka). */
+function indexStatusValue() {
+  const span = textValue(fileIndexReady ? `${fileTotal} files` : "Indexing…");
+  if (!fileIndexReady) {
+    invoke("search_files", { query: "" })
+      .then((r) => {
+        fileIndexReady = !!r.ready;
+        fileTotal = r.total || 0;
+        span.textContent = fileIndexReady ? `${fileTotal} files` : "Indexing…";
+      })
+      .catch(() => {});
+  }
+  return span;
+}
+
+function linkButton(label, onClick) {
+  const b = el("button", "link-btn", label);
+  b.type = "button";
+  b.onclick = onClick;
+  return b;
+}
+
+function aboutCard() {
+  const card = el("div", "about-card");
+  const img = document.createElement("img");
+  img.src = "sunny-icon.png";
+  img.alt = "";
+  img.draggable = false;
+  const text = el("div");
+  text.appendChild(el("div", "about-name", "Sunny"));
+  text.appendChild(
+    el(
+      "div",
+      "about-tag",
+      "A fast, lightweight launcher for Windows. GPL-3.0 port of Vicinae's core features."
+    )
+  );
+  card.append(img, text);
+  return card;
+}
+
+function renderSettingsTabs() {
+  settingsTabsEl.innerHTML = "";
+  for (const tab of SETTINGS_TABS) {
+    const b = el("button", "settings-tab" + (tab.id === settingsTab ? " on" : ""));
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(tab.id === settingsTab));
+    b.append(el("span", "tab-ico", tab.icon), el("span", "tab-label", tab.label));
+    b.onclick = () => {
+      settingsTab = tab.id;
+      renderSettings();
+    };
+    settingsTabsEl.appendChild(b);
+  }
+}
+
 function renderSettings() {
   settingsBodyEl.innerHTML = "";
   hotkeyBtnRef = null;
+  renderSettingsTabs();
 
   if (SETTINGS_ERROR) {
     settingsBodyEl.appendChild(el("div", "settings-error", SETTINGS_ERROR));
   }
 
-  settingsBodyEl.append(
-    settingsSection("General", [
-      settingsRow(
-        "Open at Login",
-        "Launch Sunny automatically when you sign in.",
-        toggleControl(SETTINGS.open_at_login, (v) =>
-          onSettingChange({ open_at_login: v }, true)
-        )
-      ),
-      settingsRow(
-        "Show in System Tray",
-        "Keep the Sunny icon in the notification area.",
-        toggleControl(SETTINGS.show_in_tray, (v) =>
-          onSettingChange({ show_in_tray: v }, true)
-        )
-      ),
-      settingsRow(
-        "Sunny Hotkey",
-        "Global shortcut to show or hide the launcher.",
-        hotkeyControl()
-      ),
-    ]),
-    settingsSection("Appearance", [
-      settingsRow(
-        "Font",
-        "Sonora ships Inter — the default Sunny typeface.",
-        fontControl()
-      ),
-      settingsRow(
-        "Font Size",
-        "Base text size across the launcher.",
-        stepperControl(SETTINGS.font_size, 12, 20, (v) =>
-          onSettingChange({ font_size: v })
-        )
-      ),
-    ]),
-    settingsSection("Window", [
-      settingsRow(
-        "Opacity",
-        "Background opacity. Text, icons, and controls stay fully opaque.",
-        sliderControl(SETTINGS.opacity, 40, 100, (v) =>
-          onSettingChange({ opacity: v })
-        )
-      ),
-      settingsRow(
-        "Blur UI",
-        "Blur the desktop backdrop behind the launcher.",
-        toggleControl(SETTINGS.blur_ui, (v) =>
-          onSettingChange({ blur_ui: v }, true)
-        )
-      ),
-      settingsRow(
-        "Window Mode",
-        "Raycast-style density of the launcher window.",
-        segmentControl(
-          [["compact", "Raycast Compact"], ["expanded", "Raycast Expanded"]],
-          SETTINGS.window_mode,
-          (v) => onSettingChange({ window_mode: v }, true)
-        )
-      ),
-    ])
-  );
+  const sections = [];
+
+  if (settingsTab === "general") {
+    sections.push(
+      settingsSectionFiltered("General", [
+        maybeRow(
+          "Open at Login",
+          "Launch Sunny automatically when you sign in.",
+          toggleControl(SETTINGS.open_at_login, (v) =>
+            onSettingChange({ open_at_login: v }, true)
+          )
+        ),
+        maybeRow(
+          "Show in System Tray",
+          "Keep the Sunny icon in the notification area.",
+          toggleControl(SETTINGS.show_in_tray, (v) =>
+            onSettingChange({ show_in_tray: v }, true)
+          )
+        ),
+        maybeRow(
+          "Sunny Hotkey",
+          "Global shortcut to show or hide the launcher.",
+          hotkeyControl()
+        ),
+      ])
+    );
+  } else if (settingsTab === "launcher") {
+    sections.push(
+      settingsSectionFiltered("Appearance", [
+        maybeRow(
+          "Font",
+          "Sonora ships Inter — the default Sunny typeface.",
+          fontControl()
+        ),
+        maybeRow(
+          "Font Size",
+          "Base text size across the launcher.",
+          stepperControl(SETTINGS.font_size, 12, 20, (v) =>
+            onSettingChange({ font_size: v })
+          )
+        ),
+      ]),
+      settingsSectionFiltered("Window", [
+        maybeRow(
+          "Opacity",
+          "Background opacity. Text, icons, and controls stay fully opaque.",
+          sliderControl(SETTINGS.opacity, 40, 100, (v) =>
+            onSettingChange({ opacity: v })
+          )
+        ),
+        maybeRow(
+          "Blur UI",
+          "Blur the desktop backdrop behind the launcher.",
+          toggleControl(SETTINGS.blur_ui, (v) =>
+            onSettingChange({ blur_ui: v }, true)
+          )
+        ),
+        maybeRow(
+          "Window Mode",
+          "Raycast-style density of the launcher window.",
+          segmentControl(
+            [["compact", "Raycast Compact"], ["expanded", "Raycast Expanded"]],
+            SETTINGS.window_mode,
+            (v) => onSettingChange({ window_mode: v }, true)
+          )
+        ),
+        maybeRow(
+          "Show Footer Hints",
+          "Display the keyboard hint bar at the bottom.",
+          toggleControl(SETTINGS.show_footer, (v) =>
+            onSettingChange({ show_footer: v }, true)
+          )
+        ),
+      ])
+    );
+  } else if (settingsTab === "shortcuts") {
+    sections.push(
+      settingsSectionFiltered("Global", [
+        maybeRow(
+          "Show / Hide Sunny",
+          "Works from any application.",
+          hotkeyControl()
+        ),
+      ]),
+      settingsSectionFiltered("In the Launcher", [
+        maybeRow("Open Settings", "Jump straight to this panel.", textValue("Ctrl + ,")),
+        maybeRow("Emoji Picker", "Type the prefix in the search field.", textValue(SETTINGS.emoji_prefix)),
+        maybeRow("Clipboard History", "Search for the command by name.", textValue("Type “clipboard”")),
+        maybeRow("Search Files", "Search for the command by name.", textValue("Type “files”")),
+        maybeRow("Close Launcher", "Hide the window.", textValue("Esc")),
+      ]),
+      settingsSectionFiltered("Clipboard", [
+        maybeRow("Paste to Active Window", "Copies and pastes into the previous app.", textValue("Enter")),
+        maybeRow("Copy Without Pasting", "Keeps the launcher open.", textValue("Ctrl + B")),
+        maybeRow("Delete Entry", "Removes the selected history item.", textValue("Ctrl + D")),
+      ]),
+      settingsSectionFiltered("Files", [
+        maybeRow("Open File", "Uses the default application.", textValue("Enter")),
+        maybeRow("Reveal in Explorer", "Selects the file in File Explorer.", textValue("Ctrl + R")),
+      ])
+    );
+  } else if (settingsTab === "keyboard") {
+    sections.push(
+      settingsSectionFiltered("Navigation", [
+        maybeRow("Move Selection", "Up and down the result list.", textValue("↑ / ↓")),
+        maybeRow("Vim Navigation", "Also use Ctrl+J / Ctrl+K to move.", toggleControl(SETTINGS.vim_nav, (v) =>
+          onSettingChange({ vim_nav: v }, true)
+        )),
+        maybeRow("Activate Selection", "Open the highlighted result.", textValue("Enter")),
+        maybeRow("Back to App Search", "Leaves emoji, clipboard, or file mode.", toggleControl(SETTINGS.backspace_back, (v) =>
+          onSettingChange({ backspace_back: v }, true)
+        )),
+      ]),
+      settingsSectionFiltered("Emoji", [
+        maybeRow(
+          "Emoji Prefix",
+          "Single character that switches the search field to emoji mode.",
+          emojiPrefixControl()
+        ),
+      ])
+    );
+  } else if (settingsTab === "advanced") {
+    sections.push(
+      settingsSectionFiltered("Data", [
+        maybeRow(
+          "Settings File",
+          "Stored as JSON in your local app data folder.",
+          linkButton("Open Folder", () =>
+            invoke("settings_dir").then((dir) => invoke("open_path", { path: dir })).catch(() => {})
+          )
+        ),
+        maybeRow(
+          "Reset All Settings",
+          "Restore every option to its default value.",
+          linkButton("Reset…", resetSettings)
+        ),
+      ]),
+      settingsSectionFiltered("Index", [
+        maybeRow(
+          "File Index",
+          "Built in the background at launch from your user folders.",
+          indexStatusValue()
+        ),
+        maybeRow(
+          "Rebuild Index",
+          "Rescan your folders now.",
+          linkButton("Rebuild", () => {
+            invoke("rebuild_file_index").catch(() => {});
+            renderSettings();
+          })
+        ),
+      ])
+    );
+  } else if (settingsTab === "about") {
+    sections.push(aboutCard());
+    sections.push(
+      settingsSectionFiltered("About", [
+        maybeRow("Version", "Sunny desktop launcher.", textValue("0.1.0")),
+        maybeRow("License", "Derivative work of Vicinae.", textValue("GPL-3.0")),
+        maybeRow("Font", "Bundled from the Sonora project.", textValue("Inter (OFL)")),
+        maybeRow("Emoji Data", "Generated from gemoji.", textValue("MIT")),
+        maybeRow("Platform", "Windows 10 / 11.", textValue("WebView2")),
+      ])
+    );
+  }
+
+  const kept = sections.filter(Boolean);
+  if (!kept.length) {
+    settingsBodyEl.appendChild(
+      el("div", "settings-empty", "No settings match your search.")
+    );
+  } else {
+    settingsBodyEl.append(...kept);
+  }
+}
+
+function emojiPrefixControl() {
+  const input = document.createElement("input");
+  input.className = "settings-search-input";
+  input.style.width = "64px";
+  input.style.paddingLeft = "10px";
+  input.style.textAlign = "center";
+  input.maxLength = 1;
+  input.value = SETTINGS.emoji_prefix;
+  input.onchange = () => {
+    const v = input.value.trim() || ":";
+    input.value = v;
+    onSettingChange({ emoji_prefix: v }, true);
+  };
+  return input;
+}
+
+async function resetSettings() {
+  try {
+    SETTINGS = await invoke("settings_reset");
+    SETTINGS_ERROR = "";
+    applyAppearance();
+    renderSettings();
+    flashSaved();
+  } catch (err) {
+    SETTINGS_ERROR = String(err);
+    renderSettings();
+  }
 }
 
 function openSettings() {
@@ -689,10 +931,13 @@ function openSettings() {
   mode = "apps";
   queryEl.value = "";
   queryEl.blur();
+  settingsFilter = "";
+  settingsSearchEl.value = "";
   document.body.classList.add("settings-open");
   settingsEl.hidden = false;
   invoke("settings_resize", { open: true }).catch(() => {});
   renderSettings();
+  settingsSearchEl.focus();
 }
 
 function closeSettings() {
@@ -782,9 +1027,10 @@ async function refresh() {
   const raw = queryEl.value;
   const q = raw.trim();
 
-  // Promosi/demosi mode via awalan ":" (ala Slack/Discord)
+  // Promosi/demosi mode via awalan emoji (default ":", bisa diubah di Settings)
+  const emojiPrefix = SETTINGS.emoji_prefix || ":";
   if (mode !== "clip") {
-    if (raw.startsWith(":")) {
+    if (raw.startsWith(emojiPrefix)) {
       if (mode !== "emoji") {
         mode = "emoji";
         queryEl.placeholder = MODE_LABEL.emoji;
@@ -798,7 +1044,7 @@ async function refresh() {
   items = [];
 
   if (mode === "emoji") {
-    const needle = q.replace(/^:+/, "").trim();
+    const needle = q.replace(/^[:;.>]+/, "").trim();
     const pool = ALL_EMOJI.filter(
       (e) => !needle ||
         e.name.toLowerCase().includes(needle.toLowerCase()) ||
@@ -915,6 +1161,10 @@ listen("sunny:files-updated", () => {
 /* Menu tray → buka panel Settings */
 listen("sunny:open-settings", () => openSettings());
 settingsBackEl.addEventListener("click", closeSettings);
+settingsSearchEl.addEventListener("input", () => {
+  settingsFilter = settingsSearchEl.value.trim().toLowerCase();
+  renderSettings();
+});
 
 queryEl.addEventListener("input", refresh);
 clipFilterEl.addEventListener("change", () => {
@@ -952,17 +1202,25 @@ window.addEventListener("keydown", (e) => {
   }
 
   const max = Math.max(items.length - 1, 0);
-  if (e.key === "ArrowDown") {
+  // Ctrl+J / Ctrl+K (opsional, Settings → Keyboard → Vim Navigation).
+  const vimDown = SETTINGS.vim_nav && e.ctrlKey && e.key.toLowerCase() === "j";
+  const vimUp = SETTINGS.vim_nav && e.ctrlKey && e.key.toLowerCase() === "k";
+  if (e.key === "ArrowDown" || vimDown) {
     e.preventDefault();
     selected = Math.min(selected + 1, max);
     render();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
-  } else if (e.key === "ArrowUp") {
+  } else if (e.key === "ArrowUp" || vimUp) {
     e.preventDefault();
     selected = Math.max(selected - 1, 0);
     render();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
-  } else if (e.key === "Backspace" && !queryEl.value && mode !== "apps") {
+  } else if (
+    e.key === "Backspace" &&
+    !queryEl.value &&
+    mode !== "apps" &&
+    SETTINGS.backspace_back
+  ) {
     e.preventDefault();
     mode = "apps";
     queryEl.placeholder = MODE_LABEL.apps;
