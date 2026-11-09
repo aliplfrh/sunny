@@ -77,18 +77,10 @@ Type `:` and search 1,870 emoji by name. <kbd>Enter</kbd> copies the one you pic
 - **Compact or Expanded** window modes
 - **Adjustable font size** and a bundled Inter typeface
 
-<div align="center">
-  <img src="docs/assets/launcher-light.png" alt="Sunny in light theme" width="720" />
-</div>
-
 ### ⚙️ A real Settings window
 
 Settings opens as its own window, with a sidebar and a search box — not a cramped panel inside the
 palette. Every change applies live, and is saved atomically so a crash can never wipe your preferences.
-
-<div align="center">
-  <img src="docs/assets/settings.png" alt="Sunny Settings window" width="720" />
-</div>
 
 ### 🔄 Updates itself
 
