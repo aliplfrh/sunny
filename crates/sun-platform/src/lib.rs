@@ -4,6 +4,9 @@
 //!   ke target-nya, sama seperti Explorer) → PNG RGBA.
 //!   Konsepnya padanan penanganan ikon app service vicinae.
 
+mod win_space;
+pub use win_space::{is_win_space, WinSpaceObserver};
+
 #[cfg(windows)]
 mod windows_imp {
     use std::io::Write;
@@ -349,6 +352,12 @@ fn parse_manifest_apps(xml: &str, root_folder: &str) -> Vec<ManifestApp> {
         let block = &tail[..end];
         rest = &tail[end + "</Application>".len()..];
 
+        // Windows marks internal components (File Picker, brokers, etc.) as hidden.
+        // They can have executables but are not user-launchable app-list entries.
+        if attr(block, "AppListEntry=").is_some_and(|value| value.eq_ignore_ascii_case("none")) {
+            continue;
+        }
+
         // Hanya aplikasi yang punya Executable (bukan sekadar background task).
         if !block.contains("Executable=") {
             continue;
@@ -370,6 +379,45 @@ fn parse_manifest_apps(xml: &str, root_folder: &str) -> Vec<ManifestApp> {
         });
     }
     out
+}
+
+#[cfg(all(test, windows))]
+mod manifest_tests {
+    use super::*;
+
+    #[test]
+    fn excludes_hidden_windows_file_picker_but_keeps_whatsapp() {
+        let xml = r#"<Applications>
+          <Application Id="Microsoft.Windows.FilePicker" Executable="FilePicker.exe">
+            <uap:VisualElements DisplayName="ms-resource:AppxManifest_DisplayName"
+              AppListEntry="none" Square44x44Logo="Assets/FilePicker.png" />
+          </Application>
+          <Application Id="App" Executable="WhatsApp.exe">
+            <uap:VisualElements DisplayName="WhatsApp" Square44x44Logo="Assets/AppList.png" />
+          </Application>
+        </Applications>"#;
+        let apps = parse_manifest_apps(xml, r"C:\Packages");
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name, "WhatsApp");
+    }
+
+    #[test]
+    fn hidden_application_attribute_is_respected() {
+        let xml = r#"<Application Id="Background" Executable="Helper.exe" uap:AppListEntry="none">
+          <uap:VisualElements DisplayName="Helper" />
+        </Application>"#;
+        assert!(parse_manifest_apps(xml, r"C:\Packages").is_empty());
+    }
+
+    #[test]
+    fn explicit_default_visibility_remains_searchable() {
+        let xml = r#"<Application Id="Calculator" Executable="Calculator.exe">
+          <uap:VisualElements DisplayName="Calculator" AppListEntry="default" />
+        </Application>"#;
+        let apps = parse_manifest_apps(xml, r"C:\Packages");
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name, "Calculator");
+    }
 }
 
 /// Ambil nilai atribut XML sederhana, mis. `Id="App"` → `App`.

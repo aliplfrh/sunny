@@ -697,6 +697,19 @@ function segmentControl(options, value, onChange) {  const wrap = el("div", "seg
 
 /* Hotkey capture — minimal satu modifier (atau tombol F1–F24). */
 let hotkeyBtnRef = null;
+let savingHotkey = false;
+
+function hotkeyLabel(accel) {
+  return accel.replace(/\bSuper\b/gi, "Win").replace(/\+/g, " + ");
+}
+
+function cancelHotkeyCapture() {
+  capturingHotkey = false;
+  if (hotkeyBtnRef) {
+    hotkeyBtnRef.classList.remove("capturing");
+    hotkeyBtnRef.textContent = hotkeyLabel(SETTINGS.hotkey);
+  }
+}
 
 function accelFromEvent(e) {
   const mods = [];
@@ -735,15 +748,16 @@ function accelFromEvent(e) {
 }
 
 function handleHotkeyCapture(e) {
+  // Let keyboard users leave the recorder and reach the explicit preset.
+  if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    cancelHotkeyCapture();
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
 
   if (e.key === "Escape") {
-    capturingHotkey = false;
-    if (hotkeyBtnRef) {
-      hotkeyBtnRef.classList.remove("capturing");
-      hotkeyBtnRef.textContent = SETTINGS.hotkey.replace(/\+/g, " + ");
-    }
+    cancelHotkeyCapture();
     return;
   }
   if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
@@ -758,32 +772,45 @@ function handleHotkeyCapture(e) {
 }
 
 async function setHotkey(accel) {
+  if (savingHotkey) return;
+  savingHotkey = true;
+  cancelHotkeyCapture();
   const prev = SETTINGS.hotkey;
-  SETTINGS.hotkey = accel;
-  if (hotkeyBtnRef) {
-    hotkeyBtnRef.classList.remove("capturing");
-    hotkeyBtnRef.textContent = accel.replace(/\+/g, " + ");
-  }
-  const err = await onSettingChange({}, true);
-  if (err) {
-    SETTINGS.hotkey = prev;
-    SETTINGS_ERROR = err;
-    invoke("settings_update", { settings: SETTINGS }).catch(() => {});
+  try {
+    const err = await onSettingChange({ hotkey: accel }, true);
+    if (err) {
+      // The backend keeps the previous binding on failure; don't write it again.
+      SETTINGS.hotkey = prev;
+      SETTINGS_ERROR = err;
+    }
+  } finally {
+    savingHotkey = false;
     renderSettings();
   }
 }
 
 function hotkeyControl() {
-  const btn = el("button", "hotkey-btn", SETTINGS.hotkey.replace(/\+/g, " + "));
+  const wrap = el("div", "hotkey-control");
+
+  const btn = el("button", "hotkey-btn", hotkeyLabel(SETTINGS.hotkey));
   btn.type = "button";
+  btn.setAttribute("aria-label", "Record Sunny hotkey");
   btn.onclick = () => {
-    if (capturingHotkey) return;
+    if (capturingHotkey || savingHotkey) return;
     capturingHotkey = true;
     btn.classList.add("capturing");
     btn.textContent = "Press a shortcut…";
   };
+
+  // Windows can consume this combo before WebView receives it. No recording needed.
+  const winSpace = el("button", "hotkey-win", "Win + Space");
+  winSpace.type = "button";
+  winSpace.title = "Use Win + Space (Windows may also switch input languages)";
+  winSpace.onclick = () => setHotkey("Super+Space");
+
+  wrap.append(btn, winSpace);
   hotkeyBtnRef = btn;
-  return btn;
+  return wrap;
 }
 
 /* ── Tab panel Settings (ala Raycast) ──────────────────── */
@@ -935,7 +962,7 @@ function renderSettings() {
         ),
         maybeRow(
           "Sunny Hotkey",
-          "Global shortcut to show or hide the launcher.",
+          "Record a shortcut, or choose Win + Space. Windows may also switch input languages; Sunny never blocks keys.",
           hotkeyControl()
         ),
       ])
@@ -1024,7 +1051,7 @@ function renderSettings() {
       settingsSectionFiltered("Global", [
         maybeRow(
           "Show / Hide Sunny",
-          "Works from any application.",
+          "Win + Space activates after release and may also switch the Windows input language.",
           hotkeyControl()
         ),
       ]),
@@ -1501,7 +1528,23 @@ async function activate(i) {
 }
 
 /* ── Fokus otomatis ────────────────────────────────────── */
+function resetLauncherSearch() {
+  if (IS_SETTINGS_WINDOW || settingsOpen) return;
+  // Invalidate in-flight requests before clearing anything, so they cannot restore
+  // the previous query's results after the launcher has reopened.
+  refreshSeq++;
+  queryEl.value = "";
+  queryEl.placeholder = MODE_LABEL.apps;
+  mode = "apps";
+  selected = 0;
+  items = [];
+  render();
+  refresh();
+}
+
 listen("sunny:shown", () => {
+  if (IS_SETTINGS_WINDOW) return;
+  resetLauncherSearch();
   // Event `sunny:backdrop` biasanya sudah membawa snapshot baru; fetch hanya
   // bila event terlewat (mis. saat WebView belum selesai dimuat).
   if (!backdropFresh) {

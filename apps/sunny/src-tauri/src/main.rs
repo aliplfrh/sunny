@@ -39,6 +39,9 @@ pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
 /// Preferensi aktif — dimuat saat start, diubah dari panel Settings.
 pub struct SettingsState(pub Mutex<Settings>);
 
+/// RAII ownership: replacing this value removes the passive keyboard observer.
+pub struct WinSpaceState(pub Mutex<Option<sun_platform::WinSpaceObserver>>);
+
 /// Panel Settings kini jendela terpisah; penanda ini dipertahankan agar
 /// mode Compact/Expanded tidak diterapkan saat setelan dibuka.
 pub struct SettingsUiOpen(pub std::sync::atomic::AtomicBool);
@@ -465,16 +468,12 @@ fn settings_reset(
     let mut next = Settings::default();
     next.normalize();
 
-    if next.hotkey != current.hotkey {
-        let gs = app.global_shortcut();
-        let _ = gs.unregister(current.hotkey.as_str());
-        if let Err(e) = gs.register(next.hotkey.as_str()) {
-            let _ = gs.register(current.hotkey.as_str());
-            return Err(format!("Hotkey cannot be registered: {e}"));
-        }
-    }
+    replace_hotkey(&app, &current.hotkey, &next.hotkey)?;
     if next.open_at_login != current.open_at_login {
-        sun_platform::set_autostart(next.open_at_login)?;
+        if let Err(error) = sun_platform::set_autostart(next.open_at_login) {
+            let _ = replace_hotkey(&app, &next.hotkey, &current.hotkey);
+            return Err(error);
+        }
     }
     apply_tray(&app, next.show_in_tray);
     apply_window_mode(&app, &next);
@@ -503,6 +502,85 @@ fn settings_preview(app: tauri::AppHandle, settings: Settings) {
     apply_window_mode(&app, &s);
 }
 
+/// Win+Space is observed, never intercepted; Windows keeps its language shortcut.
+fn register_hotkey(app: &tauri::AppHandle, accel: &str) -> Result<(), String> {
+    if sun_platform::is_win_space(accel) {
+        let state = app.state::<WinSpaceState>();
+        let mut observer = state.0.lock().unwrap();
+        if observer.is_none() {
+            let handle = app.clone();
+            *observer = Some(sun_platform::WinSpaceObserver::start(move || {
+                let target = handle.clone();
+                // Queue window work only after the physical chord is fully released.
+                let _ = handle.run_on_main_thread(move || {
+                    // Ignore queued notifications after changing to another shortcut.
+                    let active = target
+                        .state::<SettingsState>()
+                        .0
+                        .lock()
+                        .unwrap()
+                        .hotkey
+                        .clone();
+                    if sun_platform::is_win_space(&active) {
+                        toggle_main_window(&target);
+                    }
+                });
+            })?);
+        }
+        return Ok(());
+    }
+    let gs = app.global_shortcut();
+    match gs.register(accel) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            let lowered = msg.to_ascii_lowercase();
+            if !(lowered.contains("already registered") || msg.contains("1409")) {
+                return Err(format!("Hotkey cannot be registered: {msg}"));
+            }
+            Err(format!(
+                "{accel} is reserved by Windows or used by another application. Pick a different shortcut."
+            ))
+        }
+    }
+}
+
+/// Register the replacement first, preserving the working shortcut on failure.
+fn replace_hotkey(app: &tauri::AppHandle, previous: &str, next: &str) -> Result<(), String> {
+    if previous == next
+        || (sun_platform::is_win_space(previous) && sun_platform::is_win_space(next))
+    {
+        return Ok(());
+    }
+    // Accelerator strings can differ in case/alias while referring to the same key.
+    if !sun_platform::is_win_space(previous) && !sun_platform::is_win_space(next) {
+        let old = previous
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .map_err(|e| e.to_string())?;
+        let new = next
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .map_err(|e| e.to_string())?;
+        if old == new {
+            return Ok(());
+        }
+    }
+    register_hotkey(app, next)?;
+    if sun_platform::is_win_space(previous) {
+        let old = app.state::<WinSpaceState>().0.lock().unwrap().take();
+        drop(old);
+    } else if let Err(error) = app.global_shortcut().unregister(previous) {
+        // Do not leave two bindings active when unregistering the previous one fails.
+        if sun_platform::is_win_space(next) {
+            let old = app.state::<WinSpaceState>().0.lock().unwrap().take();
+            drop(old);
+        } else {
+            let _ = app.global_shortcut().unregister(next);
+        }
+        return Err(format!("Cannot replace shortcut: {error}"));
+    }
+    Ok(())
+}
+
 /// Simpan + terapkan seluruh setelan (hotkey, tray, autostart, opacity, mode).
 #[tauri::command]
 fn settings_update(
@@ -516,17 +594,13 @@ fn settings_update(
     let current = state.0.lock().unwrap().clone();
 
     // Hotkey lebih dulu — bila gagal didaftarkan, jangan ubah setelan lain.
-    if next.hotkey != current.hotkey {
-        let gs = app.global_shortcut();
-        let _ = gs.unregister(current.hotkey.as_str());
-        if let Err(e) = gs.register(next.hotkey.as_str()) {
-            let _ = gs.register(current.hotkey.as_str());
-            return Err(format!("Hotkey cannot be registered: {e}"));
-        }
-    }
+    replace_hotkey(&app, &current.hotkey, &next.hotkey)?;
 
     if next.open_at_login != current.open_at_login {
-        sun_platform::set_autostart(next.open_at_login)?;
+        if let Err(error) = sun_platform::set_autostart(next.open_at_login) {
+            let _ = replace_hotkey(&app, &next.hotkey, &current.hotkey);
+            return Err(error);
+        }
     }
 
     apply_tray(&app, next.show_in_tray);
@@ -563,6 +637,7 @@ fn main() {
         .manage(AppState(Mutex::new(Vec::new())))
         .manage(ClipboardStore::new())
         .manage(SettingsState(Mutex::new(Settings::load())))
+        .manage(WinSpaceState(Mutex::new(None)))
         .manage(SettingsUiOpen(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackdropState(Mutex::new(None)))
         .manage(SettingsBackdropState(Mutex::new(None)))
@@ -617,12 +692,10 @@ fn main() {
             let active = app.state::<SettingsState>().0.lock().unwrap().clone();
 
             // Hotkey tersimpan; fallback ke default bila gagal (mis. sudah dipakai).
-            if app
-                .global_shortcut()
-                .register(active.hotkey.as_str())
-                .is_err()
-            {
-                let _ = app.global_shortcut().register("Alt+Space");
+            if register_hotkey(app.handle(), &active.hotkey).is_err() {
+                register_hotkey(app.handle(), "Alt+Space").map_err(std::io::Error::other)?;
+                // Keep the in-memory value aligned with the binding that actually works.
+                app.state::<SettingsState>().0.lock().unwrap().hotkey = "Alt+Space".into();
             }
             apply_window_mode(app.handle(), &active);
 
@@ -764,6 +837,12 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("gagal menjalankan Sunny");
+        .build(tauri::generate_context!())
+        .expect("gagal menjalankan Sunny")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let observer = app.state::<WinSpaceState>().0.lock().unwrap().take();
+                drop(observer);
+            }
+        });
 }

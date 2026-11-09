@@ -41,6 +41,8 @@ jobs:
         run: |
           $conf = Get-Content apps/sunny/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           "version=$($conf.version)" >> $env:GITHUB_OUTPUT
+          $tag = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "v$($conf.version)" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Build installer (signed updater artifacts)
         shell: pwsh
@@ -53,11 +55,13 @@ jobs:
       - name: Collect artifacts
         id: artifacts
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           $bundle = "target/release/bundle/nsis"
-          $setup = Get-ChildItem $bundle -Filter "*-setup.exe" | Select-Object -First 1
+          $setup = Get-ChildItem $bundle -Filter "Sunny_$($env:VERSION)_*-setup.exe" | Select-Object -First 1
           if (-not $setup) { throw "NSIS installer not found in $bundle" }
-          $sig = Get-ChildItem $bundle -Filter "*-setup.exe.sig" | Select-Object -First 1
+          $sig = Get-Item "$($setup.FullName).sig" -ErrorAction SilentlyContinue
           if (-not $sig) { throw "Updater signature not found (createUpdaterArtifacts must be true)" }
           "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
           "sig=$($sig.FullName)" >> $env:GITHUB_OUTPUT
@@ -67,18 +71,19 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
           SETUP_NAME: ${{ steps.artifacts.outputs.name }}
           SIG_PATH: ${{ steps.artifacts.outputs.sig }}
         run: |
           $signature = (Get-Content $env:SIG_PATH -Raw).Trim()
           $manifest = [ordered]@{
             version   = $env:VERSION
-            notes     = "Sunny v$($env:VERSION)"
+            notes     = "Sunny $($env:RELEASE_TAG)"
             pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $signature
-                url       = "https://github.com/aliplfrh/sunny/releases/download/v$($env:VERSION)/$($env:SETUP_NAME)"
+                url       = "https://github.com/aliplfrh/sunny/releases/download/$($env:RELEASE_TAG)/$($env:SETUP_NAME)"
               }
             }
           }
@@ -98,10 +103,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
           SETUP: ${{ steps.artifacts.outputs.setup }}
           SIG: ${{ steps.artifacts.outputs.sig }}
         run: |
-          $tag = "v$($env:VERSION)"
+          $tag = $env:RELEASE_TAG
           gh release create $tag $env:SETUP $env:SIG latest.json `
             --title "Sunny $tag" `
             --notes "Sunny $tag — see docs/ROADMAP.md for what changed." `

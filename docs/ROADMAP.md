@@ -85,6 +85,13 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
       `IApplicationActivationManager`), so Store-only apps like WhatsApp are searchable
 - [x] **Result categories** — app rows show what they are: *Application*, *Game*, or
       *Windows Settings* (folder- and name-based detection)
+- [x] Respect `AppListEntry="none"` in Store manifests, excluding hidden Windows components
+      such as File Picker instead of showing their package identifiers as applications
+- [x] Reopening the launcher clears its query, results, selection and specialized search mode;
+      outstanding requests are invalidated so stale results cannot reappear
+- [x] **Win + Space option** — passive observation after key release, without suppressing or
+      injecting keyboard input; Windows may still switch input languages. Explicit preset in
+      General and Shortcuts; other accelerators keep native global registration
 - [x] **Accent color** — Launcher → Accent Color: ten curated presets, a native color picker, and a
       hex field; all highlights, switches, and selection bars derive from it (`--accent*` variables)
 - [ ] Window switcher
@@ -108,3 +115,13 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 - Window switcher
 - Linux and macOS builds (the `sun-platform` abstraction is kept clean so a port stays
   possible; Windows remains the only supported target for now)
+
+## Release v1.0.2.1 — Bug fixes
+
+- The GitHub tag is `v1.0.2.1`; the application and updater use SemVer `1.0.3` so
+  existing `1.0.2` installations recognize it as an update.
+- Clear previous launcher queries and results on reopen, including late async responses.
+- Exclude hidden Windows package entries such as File Picker (`1527…`).
+- Offer Win+Space through a passive observer, with no suppressed or synthesized key events.
+  Windows may still switch input languages. Live desktop hotkey testing is not yet performed.
+- Allow the release script and workflow to use a tag distinct from the internal version.

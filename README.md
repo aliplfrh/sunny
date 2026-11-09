@@ -92,6 +92,11 @@ Sunny checks for a new release, verifies its signature, installs it, and restart
 
 ### ⌨️ Keyboard first
 
+Choose **Win + Space** in Settings → General → Sunny Hotkey to open Sunny after
+releasing the combination. It is observed without blocking or replacing any keys;
+Windows may also switch input languages. Other shortcuts still use native registration.
+Reopening Sunny clears the previous search and returns to the application list.
+
 | Action | Shortcut |
 |---|---|
 | Show / hide Sunny | <kbd>Alt</kbd>+<kbd>Space</kbd> |

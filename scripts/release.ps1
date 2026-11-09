@@ -2,10 +2,16 @@
 #
 # Usage (from the repo root, PowerShell):
 #   powershell -File scripts/release.ps1
+#   powershell -File scripts/release.ps1 -Tag v1.0.2.1
 #
 # Requires the updater private key at %USERPROFILE%\.tauri\sunny.key
 # (or set TAURI_SIGNING_PRIVATE_KEY yourself). The public half of that key
 # must match `plugins.updater.pubkey` in apps/sunny/src-tauri/tauri.conf.json.
+
+param(
+    [ValidatePattern('^v[0-9]+(?:\.[0-9]+){2,3}(?:-[0-9A-Za-z.-]+)?$')]
+    [string]$Tag
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -13,7 +19,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $confPath = Join-Path $root "apps\sunny\src-tauri\tauri.conf.json"
 $conf = Get-Content $confPath -Raw | ConvertFrom-Json
 $version = $conf.version
-$tag = "v$version"
+if (-not $Tag) { $Tag = "v$version" }
 
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     $keyPath = Join-Path $env:USERPROFILE ".tauri\sunny.key"
@@ -26,7 +32,8 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
 Write-Host "==> Building Sunny $version (signed updater artifacts)" -ForegroundColor Cyan
 Push-Location (Join-Path $root "apps\sunny")
 try {
-    npx --yes @tauri-apps/cli@2 build
+    npx.cmd --yes @tauri-apps/cli@2 build
+    if ($LASTEXITCODE -ne 0) { throw "Installer build failed (exit $LASTEXITCODE)" }
 } finally {
     Pop-Location
 }
