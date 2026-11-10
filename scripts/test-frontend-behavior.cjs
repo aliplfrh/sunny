@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { spawnSync } = require("node:child_process");
 
 const ui = path.join(__dirname, "../apps/sunny/ui");
 const source = fs.readFileSync(path.join(ui, "main.js"), "utf8");
@@ -564,6 +565,116 @@ test("activating a web result opens the browser through the backend", async () =
   await f.run(`activate(${index})`);
   await f.settle();
   const call = f.calls.filter((c) => c.command === "web_search").pop();
-  assert.equal(call.args.query, "rust ownership");
+  assert.equal(call.args.query, "rust ownership?");
   assert.equal(call.args.engineId, "google");
+});
+
+test("actual web activation arguments pass the real Rust backend parser", async () => {
+  for (const query of ["Siapa itu jokowi?", "?c++ & rust #1", "harga 東京??"]) {
+    const f = await fixture();
+    await f.search(query);
+    await f.run('activate(items.findIndex((item) => item.kind === "web"))');
+    const call = f.calls.find((entry) => entry.command === "web_search");
+    assert.ok(call);
+    const result = spawnSync("cargo", ["run", "--quiet", "--offline", "-p", "sun-core",
+      "--example", "web_search_contract"], {
+      cwd: path.join(__dirname, ".."), input: JSON.stringify(call.args), encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const url = new URL(result.stdout.trim());
+    assert.equal(url.searchParams.get("q"), query.trim().replace(/^\?+|\?+$/g, "").trim());
+  }
+});
+
+test("marked web queries do not wait for or invoke local search", async () => {
+  const f = await fixture();
+  f.calls.length = 0;
+  for (const command of ["calc", "lorem", "search_apps", "search_files"]) {
+    f.handlers[command] = () => { throw new Error(`unexpected ${command}`); };
+  }
+  await f.search("Siapa itu jokowi?");
+  assert.equal(f.run("items[0]?.kind"), "web");
+  assert.equal(f.calls.length, 0);
+  await f.search("?😀");
+  assert.equal(f.run("items.length"), 0, "match Rust Unicode character minimum");
+});
+
+test("local providers start together and apps render before slow files", async () => {
+  const f = await fixture();
+  let resolveCalc, resolveFiles;
+  f.handlers.calc = () => new Promise((resolve) => { resolveCalc = resolve; });
+  f.handlers.search_apps = [
+    { item: { name: "Fast app", path: "fast.lnk" } },
+    { item: { name: "Second app", path: "second.lnk" } },
+  ];
+  f.handlers.search_files = () => new Promise((resolve) => { resolveFiles = resolve; });
+  f.calls.length = 0;
+  f.nodes.query.value = "fast";
+  const pending = f.run("refresh()");
+  await f.settle();
+  assert.ok(f.calls.some((call) => call.command === "search_apps"));
+  assert.ok(resolveFiles, "file provider starts concurrently");
+  resolveCalc(null);
+  await f.settle();
+  assert.equal(f.run("items[0].name"), "Fast app");
+  // Even after keyboard navigation the file append must not reset selection.
+  await f.key("ArrowDown");
+  resolveFiles({ ready: true, total: 1, items: [{ item: { name: "File", path: "file.txt" } }] });
+  await pending;
+  assert.deepEqual(f.headings(), ["Results", "Files"]);
+  assert.equal(f.run("items[selected].name"), "Second app");
+});
+
+test("file search errors preserve usable app results", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [{ item: { name: "Fast app", path: "fast.lnk" } }],
+    search_files: () => { throw new Error("File search unavailable"); },
+  } });
+  await f.search("fast");
+  assert.equal(f.run("items[0].name"), "Fast app");
+  assert.match(f.nodes.launcherStatus.textContent, /File search unavailable/);
+});
+
+test("typing bursts coalesce requests and invalidate old rows immediately", async () => {
+  const f = await fixture();
+  f.calls.length = 0;
+  for (const query of ["s", "su", "sun", "sunn", "sunny"]) {
+    f.nodes.query.value = query;
+    for (const callback of f.nodes.query.listeners.input || []) callback();
+  }
+  await f.settle();
+  assert.equal(f.run("items.length"), 0, "Enter must not launch an old result");
+  assert.equal(f.calls.length, 0);
+  await f.runTimers(40);
+  assert.equal(f.calls.filter((call) => call.command === "search_apps").length, 1);
+  assert.equal(f.calls.find((call) => call.command === "search_apps").args.query, "sunny");
+});
+
+test("late files cannot replace a newer query, including during debounce", async () => {
+  const f = await fixture();
+  let resolveFiles;
+  f.handlers.search_files = () => new Promise((resolve) => { resolveFiles = resolve; });
+  f.nodes.query.value = "old";
+  const pending = f.run("refresh()");
+  await f.settle();
+  f.nodes.query.value = "new";
+  for (const callback of f.nodes.query.listeners.input || []) callback();
+  resolveFiles({ ready: true, total: 1, items: [{ item: { name: "Stale file", path: "old.txt" } }] });
+  await pending;
+  assert.equal(f.run("items.length"), 0);
+  f.handlers.search_files = { ready: true, total: 1, items: [{ item: { name: "New file", path: "new.txt" } }] };
+  await f.runTimers(40);
+  assert.equal(f.run("items[0].name"), "New file");
+});
+
+test("Enter passes the captured marked query, and browser failures stay visible", async () => {
+  const f = await fixture({ responses: {
+    web_search: () => { throw new Error("Cannot open default browser"); },
+  } });
+  await f.search("Siapa itu jokowi?");
+  f.calls.length = 0;
+  await f.key("Enter");
+  assert.equal(f.calls.find((call) => call.command === "web_search").args.query, "Siapa itu jokowi?");
+  assert.match(f.nodes.launcherStatus.textContent, /Cannot open default browser/);
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
 });

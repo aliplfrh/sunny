@@ -4,20 +4,89 @@
 //! text, so a query can be re-run and copied again without surprises.
 
 const WORDS: [&str; 60] = [
-    "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit", "sed", "do",
-    "eiusmod", "tempor", "incididunt", "ut", "labore", "et", "dolore", "magna", "aliqua", "enim",
-    "ad", "minim", "veniam", "quis", "nostrud", "exercitation", "ullamco", "laboris", "nisi",
-    "aliquip", "ex", "ea", "commodo", "consequat", "duis", "aute", "irure", "in", "reprehenderit",
-    "voluptate", "velit", "esse", "cillum", "eu", "fugiat", "nulla", "pariatur", "excepteur",
-    "sint", "occaecat", "cupidatat", "non", "proident", "sunt", "culpa", "qui", "officia",
-    "deserunt", "mollit", "anim",
+    "lorem",
+    "ipsum",
+    "dolor",
+    "sit",
+    "amet",
+    "consectetur",
+    "adipiscing",
+    "elit",
+    "sed",
+    "do",
+    "eiusmod",
+    "tempor",
+    "incididunt",
+    "ut",
+    "labore",
+    "et",
+    "dolore",
+    "magna",
+    "aliqua",
+    "enim",
+    "ad",
+    "minim",
+    "veniam",
+    "quis",
+    "nostrud",
+    "exercitation",
+    "ullamco",
+    "laboris",
+    "nisi",
+    "aliquip",
+    "ex",
+    "ea",
+    "commodo",
+    "consequat",
+    "duis",
+    "aute",
+    "irure",
+    "in",
+    "reprehenderit",
+    "voluptate",
+    "velit",
+    "esse",
+    "cillum",
+    "eu",
+    "fugiat",
+    "nulla",
+    "pariatur",
+    "excepteur",
+    "sint",
+    "occaecat",
+    "cupidatat",
+    "non",
+    "proident",
+    "sunt",
+    "culpa",
+    "qui",
+    "officia",
+    "deserunt",
+    "mollit",
+    "anim",
 ];
 
 /// Opening sentence every Lorem ipsum text starts with, kept intact so the
 /// output is recognisable.
 const OPENING: [&str; 18] = [
-    "Lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit", "sed", "do",
-    "eiusmod", "tempor", "incididunt", "ut", "labore", "et", "dolore", "magna",
+    "Lorem",
+    "ipsum",
+    "dolor",
+    "sit",
+    "amet",
+    "consectetur",
+    "adipiscing",
+    "elit",
+    "sed",
+    "do",
+    "eiusmod",
+    "tempor",
+    "incididunt",
+    "ut",
+    "labore",
+    "et",
+    "dolore",
+    "magna",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +110,8 @@ impl Unit {
 /// Upper bound on generated text so a typo such as `lorem 999999 words`
 /// cannot block the UI thread or allocate wildly.
 const MAX_WORDS: usize = 500;
+const MAX_SENTENCE_WORDS: usize = 12;
+const PARAGRAPH_SENTENCES: usize = 4;
 
 /// Parse `lorem 3 paragraphs`, `lorem 5 sentences`, `lorem 20 words`, or a bare
 /// `lorem` (one paragraph). Returns the amount and the requested unit.
@@ -68,8 +139,9 @@ pub fn generate(amount: usize, unit: Unit) -> String {
     match unit {
         Unit::Words => words(amount),
         Unit::Sentences => sentences(amount),
-        Unit::Paragraphs => (0..amount)
-            .map(|_| sentences(4))
+        Unit::Paragraphs => (0..amount
+            .clamp(1, MAX_WORDS / (MAX_SENTENCE_WORDS * PARAGRAPH_SENTENCES)))
+            .map(|_| sentences(PARAGRAPH_SENTENCES))
             .collect::<Vec<_>>()
             .join("\n\n"),
     }
@@ -99,7 +171,7 @@ fn words(count: usize) -> String {
 }
 
 fn sentences(count: usize) -> String {
-    let count = count.clamp(1, MAX_WORDS / 4);
+    let count = count.clamp(1, MAX_WORDS / MAX_SENTENCE_WORDS);
     let mut out = Vec::with_capacity(count);
     let mut cursor = 0usize;
     for i in 0..count {
@@ -135,7 +207,10 @@ mod tests {
     fn recognizes_the_supported_forms() {
         assert_eq!(parse_query("lorem"), Some((1, Unit::Paragraphs)));
         assert_eq!(parse_query("Lorem Ipsum"), None);
-        assert_eq!(parse_query("lorem 3 paragraphs"), Some((3, Unit::Paragraphs)));
+        assert_eq!(
+            parse_query("lorem 3 paragraphs"),
+            Some((3, Unit::Paragraphs))
+        );
         assert_eq!(parse_query("lorem 5 sentences"), Some((5, Unit::Sentences)));
         assert_eq!(parse_query("lorem 20 words"), Some((20, Unit::Words)));
         assert_eq!(parse_query("lorem paragraphs"), Some((1, Unit::Paragraphs)));
@@ -171,7 +246,10 @@ mod tests {
         assert!(text.starts_with("Lorem ipsum"));
         for sentence in text.split(". ").filter(|s| !s.trim().is_empty()) {
             let first = sentence.trim_start().chars().next().unwrap();
-            assert!(first.is_uppercase(), "sentence should start uppercase: {sentence}");
+            assert!(
+                first.is_uppercase(),
+                "sentence should start uppercase: {sentence}"
+            );
         }
     }
 
@@ -183,13 +261,28 @@ mod tests {
 
     #[test]
     fn output_is_bounded_so_a_huge_request_cannot_stall_the_launcher() {
-        let text = generate(999_999, Unit::Words);
-        assert!(text.split_whitespace().count() <= MAX_WORDS);
+        for unit in [Unit::Words, Unit::Sentences, Unit::Paragraphs] {
+            // Modest red-case size so the old unbounded generator cannot exhaust RAM.
+            let text = generate(1_000, unit);
+            assert!(text.split_whitespace().count() <= MAX_WORDS, "{unit:?}");
+        }
     }
 
     #[test]
     fn repeated_requests_are_deterministic() {
         assert_eq!(generate(4, Unit::Sentences), generate(4, Unit::Sentences));
-        assert_eq!(evaluate("lorem 2 paragraphs"), evaluate("lorem 2 paragraphs"));
+        assert_eq!(
+            evaluate("lorem 2 paragraphs"),
+            evaluate("lorem 2 paragraphs")
+        );
+    }
+
+    #[test]
+    fn maximum_integer_requests_are_bounded_for_every_unit() {
+        for unit in [Unit::Words, Unit::Sentences, Unit::Paragraphs] {
+            let text = generate(usize::MAX, unit);
+            assert!(text.split_whitespace().count() <= MAX_WORDS);
+            assert!(!text.is_empty());
+        }
     }
 }

@@ -99,6 +99,7 @@ let clipTotal = 0; // jumlah entri sebelum difilter (untuk "74 items")
 let fileIndexReady = false;
 let fileTotal = 0;
 let refreshSeq = 0; // penjaga balapan hasil pencarian async
+let searchTimer = null;
 
 // Perintah internal — hanya muncul saat dicari (bukan di daftar default).
 const COMMANDS = [
@@ -1712,6 +1713,8 @@ function filesCommandVisible(query) {
 /* Commands are shared by search and settings; keep this helper next to them. */
 async function refresh() {
   if (IS_SETTINGS_WINDOW || settingsOpen) return;
+  clearTimeout(searchTimer);
+  searchTimer = null;
   const seq = ++refreshSeq;
   const q = queryEl.value.trim();
   const nextItems = [];
@@ -1745,50 +1748,67 @@ async function refresh() {
         ...home.favorites.map((app) => ({ ...app, kind: "app", group: "Favorites" })),
         ...home.suggestions.map((app) => ({ ...app, kind: "app", group: "Suggestions" }))
       );
-    } else {
-      const value = await invoke("calc", { query: q });
-      if (seq !== refreshSeq) return;
-      if (value != null) nextItems.push({ kind: "calc", expr: q, value, group: "Results" });
-
-      const text = await invoke("lorem", { query: q });
-      if (seq !== refreshSeq) return;
-      if (text != null) nextItems.push({ kind: "lorem", expr: q, text, group: "Results" });
-
-      // A trailing `?` makes this a web search instead of a local lookup.
-      const marked = q.endsWith("?") || q.startsWith("?");
-      if (marked) {
-        const engine = currentEngine();
-        const searchText = q.replace(/^\?+|\?+$/g, "").trim();
-        if (engine && searchText.length >= 2) {
-          nextItems.push({
-            kind: "web",
-            group: "Results",
-            engine: engine.id,
-            engineName: engine.name,
-            text: searchText,
-          });
-        }
+    } else if (q.endsWith("?") || q.startsWith("?")) {
+      // Explicit web intent never scans local apps/files or waits for IPC.
+      const engine = currentEngine();
+      const searchText = q.replace(/^\?+|\?+$/g, "").trim();
+      if (engine && Array.from(searchText).length >= 2) {
+        nextItems.push({
+          kind: "web", group: "Results", engine: engine.id,
+          engineName: engine.name, text: searchText, query: q,
+        });
       }
-
+    } else {
+      const fileLimit = Math.max(0, Math.min(30, Number(SETTINGS.file_results) || 0));
+      // Attach error handling immediately: files may reject before apps finish.
+      const fileRequest = SETTINGS.include_files && fileLimit > 0 && q.length >= 2
+        ? invoke("search_files", { query: q, limit: fileLimit }).then(
+            (value) => ({ value }), (error) => ({ error }))
+        : null;
+      const results = await Promise.allSettled([
+        invoke("calc", { query: q }),
+        /^(lorem|ipsum)(\s|$)/i.test(q) ? invoke("lorem", { query: q }) : Promise.resolve(null),
+        invoke("search_apps", { query: q }),
+      ]);
+      if (seq !== refreshSeq) return;
+      const [calculation, lorem, apps] = results;
+      if (calculation.status === "fulfilled" && calculation.value != null) {
+        nextItems.push({ kind: "calc", expr: q, value: calculation.value, group: "Results" });
+      }
+      if (lorem.status === "fulfilled" && lorem.value != null) {
+        nextItems.push({ kind: "lorem", expr: q, text: lorem.value, group: "Results" });
+      }
       const cmds = COMMANDS
         .filter((c) => fuzzy(q, c.keys))
         .filter((c) => c.cmd !== "files" || filesCommandVisible(q))
         .map(({ keys, ...c }) => ({ ...c, group: "Results" }));
-      const str = await invoke("search_apps", { query: q });
-      if (seq !== refreshSeq) return;
+      const str = apps.status === "fulfilled" ? apps.value : [];
       nextItems.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app", group: "Results" })));
-
-      // Headings are presentation only, never entries in the keyboard index.
-      const fileLimit = Math.max(0, Math.min(30, Number(SETTINGS.file_results) || 0));
-      if (SETTINGS.include_files && fileLimit > 0 && q.length >= 2) {
-        const res = await invoke("search_files", { query: q });
+      for (const result of results) {
+        if (result.status === "rejected") showLauncherError(result.reason);
+      }
+      if (fileRequest) {
+        // Publish apps atomically before slow files; backing items always match DOM.
+        items = [...nextItems];
+        selected = 0;
+        render();
+        const result = await fileRequest;
         if (seq !== refreshSeq) return;
+        if (result.error) {
+          showLauncherError(result.error);
+          return;
+        }
+        const res = result.value;
         fileIndexReady = !!res.ready;
         fileTotal = res.total || 0;
         const files = res.items
           .slice(0, fileLimit)
           .map((hit) => ({ ...hit.item, kind: "file", group: "Files" }));
         nextItems.push(...files);
+        // Files are appended only. Preserve a user's app selection and its index.
+        items = nextItems;
+        render();
+        return;
       }
     }
   } catch (error) {
@@ -1818,7 +1838,7 @@ async function activate(i) {
     hideWindow();
   } else if (item.kind === "web") {
     try {
-      await invoke("web_search", { query: item.text, engineId: item.engine });
+      await invoke("web_search", { query: item.query, engineId: item.engine });
       hideWindow();
     } catch (error) {
       showLauncherError(error);
@@ -1919,7 +1939,19 @@ settingsSearchEl.addEventListener("input", () => {
   renderSettings();
 });
 
-queryEl.addEventListener("input", refresh);
+queryEl.addEventListener("input", () => {
+  // Invalidate immediately, not when the timer fires. Enter cannot activate a
+  // result belonging to the previous query during the short typing debounce.
+  ++refreshSeq;
+  clearTimeout(searchTimer);
+  closeActions(false);
+  items = [];
+  selected = 0;
+  render();
+  const q = queryEl.value.trim();
+  if (mode === "emoji" || !q || q.startsWith("?") || q.endsWith("?")) refresh();
+  else searchTimer = setTimeout(refresh, 40);
+});
 modeBackEl?.addEventListener("click", backToApps);
 actionsBtnEl?.addEventListener("click", toggleActions);
 document.addEventListener("pointerdown", (e) => {

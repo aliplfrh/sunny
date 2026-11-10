@@ -4,6 +4,7 @@
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+mod index;
 mod presentation;
 mod version;
 
@@ -54,18 +55,12 @@ fn show_or_focus_main_window(app: &tauri::AppHandle) {
     });
 }
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use sun_core::clipboard::{ClipEntry, ClipboardStore};
 use sun_core::settings::Settings;
 
 /// Cache in-memory daftar aplikasi — menghindari disk IO per-tombol (perf fix).
-pub struct AppState(pub Mutex<Vec<sun_core::apps::AppEntry>>);
-
-/// Serializes the first full scan; other cold requests wait for its result instead
-/// of each rebuilding the Start Menu + Microsoft Store index concurrently.
-/// `AppState` stays empty only while a scan is in progress, so this is the
-/// initialization lock, not a hot-path lock.
-pub struct AppIndexInit(pub Mutex<()>);
+pub struct AppState(pub index::SnapshotIndex<sun_core::apps::AppEntry>);
 
 /// Preferensi aktif — dimuat saat start, diubah dari panel Settings.
 pub struct SettingsState(pub Mutex<Settings>);
@@ -95,7 +90,7 @@ pub struct SettingsBackdropState(pub Mutex<Option<String>>);
 
 /// Indeks file pengguna + status pembangunan di background.
 pub struct FileIndexState {
-    pub files: Mutex<Vec<sun_core::files::FileEntry>>,
+    pub files: Mutex<Arc<Vec<sun_core::files::FileEntry>>>,
     pub ready: std::sync::atomic::AtomicBool,
 }
 
@@ -205,31 +200,14 @@ async fn background<T: Send + 'static>(
         .ok_or_else(|| "Background task stopped unexpectedly".to_string())?
 }
 
-fn app_index(app: &tauri::AppHandle) -> Result<Vec<sun_core::apps::AppEntry>, String> {
-    let state = app.state::<AppState>();
-    if let Ok(current) = state.0.lock() {
-        if !current.is_empty() {
-            return Ok(current.clone());
-        }
-    }
-    // One initializer at a time. Re-check after waiting: the previous holder may
-    // already have populated the cache, including on the background warm-up thread.
-    let init = app.state::<AppIndexInit>();
-    let _init_guard = init.0.lock().map_err(|_| "Application index unavailable")?;
-    let mut cache = state
-        .0
-        .lock()
-        .map_err(|_| "Application index unavailable")?;
-    if cache.is_empty() {
-        *cache = load_app_index();
-    }
-    Ok(cache.clone())
+fn app_index(app: &tauri::AppHandle) -> Result<Arc<Vec<sun_core::apps::AppEntry>>, String> {
+    app.state::<AppState>().0.get_or_init(load_app_index)
 }
 
 /// Application cache, with initial scanning off the UI thread.
 #[tauri::command]
 async fn list_apps(app: tauri::AppHandle) -> Result<Vec<sun_core::apps::AppEntry>, String> {
-    background(move || app_index(&app)).await
+    background(move || Ok(app_index(&app)?.as_ref().clone())).await
 }
 
 /// Pencarian fuzzy terhadap aplikasi (memakai cache, tanpa IO).
@@ -332,19 +310,25 @@ fn search_engines() -> Vec<sun_core::websearch::SearchEngine> {
 /// Sunny sendiri tidak melakukan permintaan jaringan: URL dirender di sini lalu
 /// dibuka lewat handler default Windows, jadi mesin pencari yang dihubungi.
 #[tauri::command]
-fn web_search(query: String, engine_id: String) -> Result<String, String> {
+async fn web_search(query: String, engine_id: String) -> Result<String, String> {
     let engine = sun_core::websearch::engine_by_id(&engine_id);
-    let (_, url) = sun_core::websearch::prepare(&query, &engine).map_err(|reason| match reason {
-        sun_core::websearch::NotASearch::MissingQuestionMark => {
-            "Add ? to the end of the query to search the web.".to_string()
-        }
-        sun_core::websearch::NotASearch::EmptyQuery => "Type something to search for.".to_string(),
-        sun_core::websearch::NotASearch::TooShort => {
-            "Type at least two characters to search for.".to_string()
-        }
-    })?;
-    sun_platform::shell_open(&url)?;
-    Ok(url)
+    let (_, url) =
+        sun_core::websearch::prepare(&query, &engine).map_err(|reason| match reason {
+            sun_core::websearch::NotASearch::MissingQuestionMark => {
+                "Add ? to the end of the query to search the web.".to_string()
+            }
+            sun_core::websearch::NotASearch::EmptyQuery => {
+                "Type something to search for.".to_string()
+            }
+            sun_core::websearch::NotASearch::TooShort => {
+                "Type at least two characters to search for.".to_string()
+            }
+        })?;
+    background(move || {
+        sun_platform::shell_open(&url)?;
+        Ok(url)
+    })
+    .await
 }
 
 /// Salin teks ke clipboard (fallback bila JS clipboard API gagal).
@@ -424,20 +408,24 @@ fn settings_backdrop_get(state: tauri::State<'_, SettingsBackdropState>) -> Opti
 
 /// Cari file/folder di indeks pengguna (fuzzy, seperti "Search Files" Raycast).
 #[tauri::command]
-fn search_files(
+async fn search_files(
     query: String,
-    state: tauri::State<'_, FileIndexState>,
-) -> sun_core::files::FileSearchResult {
-    use std::sync::atomic::Ordering;
-    let ready = state.ready.load(Ordering::Relaxed);
-    let files = state.files.lock().unwrap();
-    let total = files.len();
-    let items = sun_core::files::search(&files, &query, 60);
-    sun_core::files::FileSearchResult {
-        items,
-        ready,
-        total,
-    }
+    app: tauri::AppHandle,
+    limit: Option<usize>,
+) -> Result<sun_core::files::FileSearchResult, String> {
+    background(move || {
+        let state = app.state::<FileIndexState>();
+        let ready = state.ready.load(std::sync::atomic::Ordering::Relaxed);
+        let files = Arc::clone(&*state.files.lock().map_err(|_| "File index unavailable")?);
+        let total = files.len();
+        let items = sun_core::files::search(&files, &query, limit.unwrap_or(60).min(60));
+        Ok(sun_core::files::FileSearchResult {
+            items,
+            ready,
+            total,
+        })
+    })
+    .await
 }
 
 /// Bangun ulang indeks file di background (dipakai tombol "Rebuild").
@@ -451,7 +439,7 @@ fn rebuild_file_index(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let files = sun_core::files::build_index();
         if let Some(st) = handle.try_state::<FileIndexState>() {
-            *st.files.lock().unwrap() = files;
+            *st.files.lock().unwrap() = Arc::new(files);
             st.ready.store(true, Ordering::Relaxed);
         }
         let _ = handle.emit("sunny:files-updated", ());
@@ -804,8 +792,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(AppState(Mutex::new(Vec::new())))
-        .manage(AppIndexInit(Mutex::new(())))
+        .manage(AppState(index::SnapshotIndex::default()))
         .manage(ClipboardStore::new())
         .manage(SettingsState(Mutex::new(Settings::load())))
         .manage(SettingsTransactions(Mutex::new(())))
@@ -818,7 +805,7 @@ fn main() {
         .manage(BackdropState(Mutex::new(None)))
         .manage(SettingsBackdropState(Mutex::new(None)))
         .manage(FileIndexState {
-            files: Mutex::new(Vec::new()),
+            files: Mutex::new(Arc::new(Vec::new())),
             ready: std::sync::atomic::AtomicBool::new(false),
         })
         .plugin(
@@ -973,14 +960,8 @@ fn main() {
                 sun_core::apps::build_icon_cache(sun_platform::extract_icon_png);
                 // Isi ulang cache aplikasi (kini ikon asli tersedia). Ambil lock inisialisasi
                 // yang sama agar cold-start request tidak memicu scan kedua secara bersamaan.
-                let apps = load_app_index();
-                if let Ok(init) = state_handle.state::<AppIndexInit>().0.lock() {
-                    if let Some(st) = state_handle.try_state::<AppState>() {
-                        if let Ok(mut cache) = st.0.lock() {
-                            *cache = apps;
-                        }
-                    }
-                    drop(init);
+                if let Err(error) = state_handle.state::<AppState>().0.refresh(load_app_index) {
+                    let _ = handle.emit_to("main", "sunny:launcher-warning", error);
                 }
                 let _ = handle.emit("sunny:apps-updated", ());
             });
@@ -1026,7 +1007,7 @@ fn main() {
                 std::thread::spawn(move || {
                     let files = sun_core::files::build_index();
                     if let Some(st) = handle.try_state::<FileIndexState>() {
-                        *st.files.lock().unwrap() = files;
+                        *st.files.lock().unwrap() = Arc::new(files);
                         st.ready.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     let _ = handle.emit("sunny:files-updated", ());

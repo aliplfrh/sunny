@@ -2,6 +2,29 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Release v1.0.7 — Search correctness and responsiveness
+
+- **Open hotkey bug:** Win+Space can pass Space to the foreground app and pause YouTube.
+  An attempted Space-only filter was rolled back after live user testing opened Windows
+  Start/Search instead. Pure routing tests did not model Windows shell behavior. Preserve
+  each user's configured accelerator; do not ship another hook change without testing
+  YouTube, normal typing, the Start menu/input switcher, and both key-release orders.
+- Preserve the marked query through web-search activation; regression tests pass actual UI
+  arguments into the Rust URL parser rather than accepting a permissive browser mock.
+- Explicit `?` queries bypass local providers. Coalesce typing bursts with a 40 ms debounce,
+  invalidating stale results immediately so Enter cannot launch an older query's result.
+- Run file ranking and browser opening off the native UI thread. Publish apps before files,
+  preserve keyboard selection when files arrive, and keep apps usable if file search fails.
+- Share immutable app/file index snapshots instead of deep-copying every app icon on each
+  query. Cache empty app scans as initialized; serialize cold scans and icon refresh scans.
+- Bound Lorem output to at most 500 words for every unit, including extreme paragraph counts.
+
+Reproducible synthetic benchmark: `cargo run --release -p sun-core --example search_benchmark`.
+On the development machine, ranking 400 entries with 32 KB icons took 8.61 ms/query with the
+old deep index copy versus 1.92 ms borrowing the index. Ranking 60,000 synthetic files took
+23–36 ms median depending on query; this work previously ran on the native UI thread.
+These are core microbenchmarks, not installed-app typing/opening latency measurements.
+
 ## Phase 0 — Foundation ✅
 - [x] License decision: port of Vicinae core features → GPL-3.0 (with NOTICE attribution to Vicinae)
 - [x] UI stack decision: Tauri v2 (WebView2) for a Raycast-like appearance

@@ -17,6 +17,7 @@ function fixture(isSettings = false) {
   const context = {
     IS_SETTINGS_WINDOW: isSettings, settingsOpen: false,
     mode: "clip", selected: 12, items: [{ name: "old result" }], refreshSeq: 5,
+    searchTimer: null, clearTimeout() {},
     queryEl: { value: "whats", placeholder: "Clipboard", focus() { focuses++; } },
     MODE_LABEL: { apps: "Search apps..." },
     backdropFresh: true,

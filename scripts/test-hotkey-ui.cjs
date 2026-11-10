@@ -72,3 +72,22 @@ test("Tab cancels recording and keeps native keyboard focus navigation", () => {
   assert.equal(context.capturingHotkey, false);
   assert.equal(prevented, false);
 });
+
+test("recording respects each user's accelerator rather than forcing a preset", async () => {
+  for (const [event, expected] of [
+    [{ key: " ", altKey: true }, "Alt+Space"],
+    [{ key: " ", ctrlKey: true }, "Ctrl+Space"],
+    [{ key: "k", ctrlKey: true, shiftKey: true }, "Ctrl+Shift+K"],
+    [{ key: "p", altKey: true, shiftKey: true }, "Alt+Shift+P"],
+    [{ key: "j", metaKey: true }, "Super+J"],
+    [{ key: "F8" }, "F8"],
+  ]) {
+    const { api, context, calls } = fixture();
+    api.hotkeyControl().children[0].onclick();
+    api.handleHotkeyCapture({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, ...event });
+    await new Promise(setImmediate);
+    assert.deepEqual(calls, [expected]);
+    assert.equal(context.SETTINGS.hotkey, expected);
+  }
+});

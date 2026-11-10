@@ -59,6 +59,10 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
 - **Favorites and Suggestions** — the home view shows pinned apps, then suggestions ranked by
   how often you successfully launch them; preferences and counts stay on your computer
 - **Calculator** — type `12*7` and the answer is the first row; press <kbd>Enter</kbd> to copy it
+- **Quick web search** — type `rust ownership?` (or `?rust ownership`), then <kbd>Enter</kbd>;
+  choose the engine in Settings → Launcher → Quick Web Search
+- **Lorem ipsum** — type `lorem`, `lorem 3 paragraphs`, `lorem 5 sentences`, or `lorem 20 words`;
+  press <kbd>Enter</kbd> to copy the generated text
 - **Commands** — Clipboard History, Emoji Picker, Search Files, Settings. Each command appears
   only when you search for it; **Search Files** additionally stays hidden while
   *Include Files in Root Search* already covers it
