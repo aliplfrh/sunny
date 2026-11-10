@@ -3625,7 +3625,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sun-core"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "base64 0.23.1",
  "dirs 6.0.0",
@@ -3639,7 +3639,7 @@ dependencies = [
 
 [[package]]
 name = "sun-platform"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "png",
  "windows",
@@ -3648,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "sunny"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "arboard",
  "base64 0.23.1",
