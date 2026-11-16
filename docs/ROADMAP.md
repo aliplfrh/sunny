@@ -2,6 +2,16 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Release v1.0.8 — File actions
+
+- [x] **File actions** — <kbd>Ctrl</kbd>+<kbd>K</kbd> on a file row opens *Open File*,
+      *Copy Full Path*, and *Show in Explorer*. App rows keep their Favorites actions.
+- [x] **Copy Full Path** shortcut <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>; copies
+      without closing the launcher and confirms in the status line.
+- [x] **Ctrl+R reveal** now also works for file rows in the root search, not
+      only inside Search Files mode.
+- [ ] Live Windows verification of the copied path and Explorer selection (not yet performed).
+
 ## Release v1.0.7 — Search correctness and responsiveness
 
 - **Open hotkey bug:** Win+Space can pass Space to the foreground app and pause YouTube.

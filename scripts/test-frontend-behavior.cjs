@@ -240,6 +240,58 @@ test("favorite errors are visible and do not discard the home payload", async ()
   assert.equal(f.run("items[0].name"), "Fallback");
 });
 
+test("file rows offer Copy Full Path and Show in Explorer without closing the launcher", async () => {
+  const copied = [];
+  const f = await fixture({ responses: {
+    search_apps: [],
+    search_files: { ready: true, total: 1, items: [{ item: { name: "Report.pdf", path: "C:\\Users\\me\\Downloads\\Report.pdf" } }] },
+  } });
+  f.context.navigator.clipboard.writeText = async (text) => { copied.push(text); };
+  await f.search("report");
+  assert.equal(f.run("items[0].kind"), "file");
+
+  await f.key("K", { ctrlKey: true, shiftKey: true });
+  assert.equal(f.nodes.actions.hidden, false);
+  assert.deepEqual(f.nodes.actions.querySelectorAll("button").map((b) => b.textContent),
+    ["Open File", "Copy Full Path", "Show in Explorer"]);
+
+  await f.nodes.actions.querySelectorAll("button")[1].click();
+  await f.settle();
+  assert.deepEqual(copied, ["C:\\Users\\me\\Downloads\\Report.pdf"]);
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+
+  await f.key("K", { ctrlKey: true, shiftKey: true });
+  await f.nodes.actions.querySelectorAll("button")[2].click();
+  await f.settle();
+  assert.equal(f.calls.filter((call) => call.command === "reveal_path").pop().args.path,
+    "C:\\Users\\me\\Downloads\\Report.pdf");
+});
+
+test("file actions are reachable by shortcut and never open an unrelated row", async () => {
+  const copied = [];
+  const f = await fixture({ responses: {
+    search_apps: [],
+    search_files: { ready: true, total: 1, items: [{ item: { name: "Notes.txt", path: "C:\\Temp\\Notes.txt" } }] },
+  } });
+  f.context.navigator.clipboard.writeText = async (text) => { copied.push(text); };
+  await f.search("notes");
+  await f.key("C", { ctrlKey: true, shiftKey: true });
+  assert.deepEqual(copied, ["C:\\Temp\\Notes.txt"]);
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+  await f.key("r", { ctrlKey: true });
+  assert.equal(f.calls.filter((call) => call.command === "reveal_path").pop().args.path, "C:\\Temp\\Notes.txt");
+});
+
+test("rows without file or app actions never open the actions menu", async () => {
+  const f = await fixture();
+  await f.search("emoji");
+  const index = f.run('items.findIndex((item) => item.cmd === "emoji")');
+  await f.run(`activate(${index})`);
+  await f.settle();
+  await f.key("K", { ctrlKey: true, shiftKey: true });
+  assert.equal(f.nodes.actions.hidden, true);
+});
+
 test("snapshot events are window-specific, tint changes immediately, and settings opacity has no floor", async () => {
   for (const settingsWindow of [false, true]) {
     const f = await fixture({ settingsWindow, settings: { opacity: 40, blur_ui: true, theme: "light" } });

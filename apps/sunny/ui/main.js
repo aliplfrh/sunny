@@ -381,14 +381,16 @@ function renderFooter() {
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Open</span>
       <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>R</kbd> Reveal</span>`;
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>R</kbd> Reveal</span>
+      <span class="hint-sep"></span>
+      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${hasActions(items[selected]) ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
   } else {
     hintsEl.innerHTML = `
       <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Sunny</span>
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Open</span>
       <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${items[selected]?.kind === "app" ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
+      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${hasActions(items[selected]) ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
   }
   hintsEl.querySelector("[data-actions]")?.addEventListener("click", toggleActions);
   hintsEl.querySelector("[data-back]")?.addEventListener("click", backToApps);
@@ -396,10 +398,11 @@ function renderFooter() {
 
 function render() {
   modeBackEl.hidden = mode === "apps";
-  const canAct = mode === "apps" && items[selected]?.kind === "app";
+  const canAct = hasActions(items[selected]);
   actionsBtnEl.hidden = !canAct;
   actionsBtnEl.disabled = !canAct;
-  actionsBtnEl.title = `App actions (${SETTINGS.vim_nav ? "Ctrl+Shift+K" : "Ctrl+K"})`;
+  actionsBtnEl.title = `${actionsTitle(items[selected])} (Ctrl+K)`;
+  actionsBtnEl.setAttribute("aria-label", actionsTitle(items[selected]));
   const isClip = mode === "clip";
   clipHeadEl.hidden = !isClip;
   clipFilterEl.hidden = !isClip;
@@ -497,7 +500,7 @@ function render() {
 
     row.onclick = () => activate(i);
     row.oncontextmenu = (e) => {
-      if (item.kind !== "app") return;
+      if (!hasActions(item)) return;
       e.preventDefault();
       closeActions(false);
       selected = i;
@@ -513,7 +516,7 @@ function render() {
           el.setAttribute("aria-selected", String(j === i));
         });
         queryEl.setAttribute("aria-activedescendant", `result-${i}`);
-        const canAct = mode === "apps" && item.kind === "app";
+        const canAct = hasActions(item);
         actionsBtnEl.hidden = !canAct;
         actionsBtnEl.disabled = !canAct;
         renderFooter();
@@ -538,11 +541,49 @@ function render() {
 function showLauncherError(error = "") {
   launcherStatusEl.textContent = error ? String(error) : "";
   launcherStatusEl.hidden = !error;
+  launcherStatusEl.classList.remove("info");
+}
+
+/** Non-error confirmation that never hides itself behind an error style. */
+function showLauncherNote(text) {
+  launcherStatusEl.textContent = text;
+  launcherStatusEl.hidden = false;
+  launcherStatusEl.classList.add("info");
 }
 
 function isFavorite(path) {
   const key = String(path).toLowerCase();
   return launcherHome.favorites.some((app) => app.path.toLowerCase() === key);
+}
+
+/* Actions exist only for rows that have real commands behind them. */
+function hasActions(item) {
+  return item?.kind === "app" || item?.kind === "file";
+}
+
+function actionsTitle(item) {
+  return item?.kind === "file" ? "File actions" : "App actions";
+}
+
+/** Copy a full path without hiding the launcher, so nearby rows stay usable. */
+async function copyFilePath(item) {
+  closeActions();
+  try {
+    const text = String(item.path);
+    const copied = await navigator.clipboard?.writeText(text).then(() => true).catch(() => false);
+    if (!copied) await invoke("copy_to_clipboard", { text });
+    showLauncherNote(`Copied path: ${text}`);
+  } catch (error) {
+    showLauncherError(`Could not copy the path: ${error}`);
+  }
+}
+
+/** Show the folder with the file selected; a missing folder surfaces its error. */
+function revealFilePath(item) {
+  closeActions();
+  invoke("reveal_path", { path: item.path })
+    .then(() => showLauncherError())
+    .catch((error) => showLauncherError(`Could not show this file: ${error}`));
 }
 
 async function refreshHome() {
@@ -594,12 +635,18 @@ function toggleActions() {
     return;
   }
   const item = items[selected];
-  if (mode !== "apps" || item?.kind !== "app" || favoriteBusy) return;
+  if (!hasActions(item) || favoriteBusy) return;
   actionsEl.innerHTML = "";
-  const actions = [
-    ["Open Application", () => { closeActions(); activate(items.indexOf(item)); }],
-    [isFavorite(item.path) ? "Remove from Favorites" : "Add to Favorites", () => setAppFavorite(item)],
-  ];
+  const actions = item.kind === "file"
+    ? [
+        ["Open File", () => { closeActions(); activate(items.indexOf(item)); }],
+        ["Copy Full Path", () => copyFilePath(item)],
+        ["Show in Explorer", () => revealFilePath(item)],
+      ]
+    : [
+        ["Open Application", () => { closeActions(); activate(items.indexOf(item)); }],
+        [isFavorite(item.path) ? "Remove from Favorites" : "Add to Favorites", () => setAppFavorite(item)],
+      ];
   for (const [label, action] of actions) {
     const button = el("button", "action-item", label);
     button.type = "button";
@@ -609,6 +656,7 @@ function toggleActions() {
   }
   actionsOpen = true;
   actionsEl.hidden = false;
+  actionsEl.setAttribute("aria-label", actionsTitle(item));
   actionsBtnEl.setAttribute("aria-expanded", "true");
   renderFooter();
   focusAction(0);
@@ -1293,7 +1341,8 @@ function renderSettings(force = false) {
       settingsSectionFiltered("In the Launcher", [
         maybeRow("Open Settings", "Jump straight to this panel.", textValue("Ctrl + ,")),
         maybeRow("Emoji Picker", "Search for the command, then open it.", textValue("Type “emoji” → Enter")),
-        maybeRow("App Actions / Favorites", "Open app actions to add or remove a favorite. Ctrl+K is also available when Vim navigation is off.", textValue("Ctrl + Shift + K")),
+        maybeRow("Actions", "Open actions for the selected app or file. Ctrl+K is also available when Vim navigation is off.", textValue("Ctrl + Shift + K")),
+        maybeRow("File Path", "Copy the selected file's full path without closing the launcher.", textValue("Ctrl + Shift + C")),
         maybeRow("Back to App Search", "Leave a command view. Backspace also works when its search field is empty and enabled in Keyboard.", textValue("Esc")),
         maybeRow("Clipboard History", "Search for the command by name.", textValue("Type “clipboard”")),
         maybeRow("Search Files", "Search for the command by name.", textValue("Type “files”")),
@@ -1306,7 +1355,8 @@ function renderSettings(force = false) {
       ]),
       settingsSectionFiltered("Files", [
         maybeRow("Open File", "Uses the default application.", textValue("Enter")),
-        maybeRow("Reveal in Explorer", "Selects the file in File Explorer.", textValue("Ctrl + R")),
+        maybeRow("Reveal in Explorer", "Selects the file in File Explorer, in Files mode or root search.", textValue("Ctrl + R")),
+        maybeRow("Copy Full Path", "Copies the selected file's path without pasting it.", textValue("Ctrl + Shift + C")),
       ])
     );
   } else if (settingsTab === "keyboard") {
@@ -2059,13 +2109,13 @@ window.addEventListener("keydown", (e) => {
     if (item?.kind === "clip") {
       invoke("copy_to_clipboard", { text: item.text }).then(hideWindow);
     }
-  } else if (mode === "files" && e.ctrlKey && e.key.toLowerCase() === "r") {
-    // Tampilkan file terpilih di File Explorer.
+  } else if (items[selected]?.kind === "file" && e.ctrlKey && !e.altKey && !e.metaKey && e.shiftKey && e.key.toLowerCase() === "c") {
     e.preventDefault();
-    const item = items[selected];
-    if (item?.kind === "file") {
-      invoke("reveal_path", { path: item.path }).catch(() => {});
-    }
+    copyFilePath(items[selected]);
+  } else if (items[selected]?.kind === "file" && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "r") {
+    // Tampilkan file terpilih di File Explorer (berlaku juga di pencarian utama).
+    e.preventDefault();
+    revealFilePath(items[selected]);
   } else if (e.key === "Enter") {
     e.preventDefault();
     activate(selected);

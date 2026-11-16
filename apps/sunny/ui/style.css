@@ -321,6 +321,10 @@ body.no-footer .toolbar-actions {
   color: var(--error);
   font-size: calc(var(--fs) * 0.86);
 }
+/* Informational confirmations (for example a copied path) are not errors. */
+.launcher-status.info {
+  color: var(--text-dim);
+}
 .action-menu {
   position: absolute;
   right: 12px;

@@ -66,6 +66,9 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
 - **Commands** — Clipboard History, Emoji Picker, Search Files, Settings. Each command appears
   only when you search for it; **Search Files** additionally stays hidden while
   *Include Files in Root Search* already covers it
+- **File actions** — for any file row, <kbd>Ctrl</kbd>+<kbd>K</kbd> opens **Open File**,
+  **Copy Full Path**, and **Show in Explorer**; the path copy and reveal work from both the
+  dedicated Files view and the Files section of a normal search
 
 ### 📋 Clipboard history
 
@@ -132,6 +135,8 @@ Reopening Sunny clears the previous search and returns to Favorites and Suggesti
 | Emoji picker | Search **Emoji**, then <kbd>Enter</kbd> |
 | Back to app search | <kbd>Backspace</kbd> |
 | Reveal file in Explorer | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
+| Copy a file's full path | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> |
+| Actions (apps and files) | <kbd>Ctrl</kbd>+<kbd>K</kbd> |
 | Vim navigation (optional) | <kbd>Ctrl</kbd>+<kbd>J</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> |
 
 <br />
