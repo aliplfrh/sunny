@@ -49,6 +49,8 @@ pub struct Settings {
     pub accent: String,
     /// Mesin pencari default untuk "Quick Web Search" (kueri berakhiran `?`).
     pub search_engine: String,
+    /// Optional absolute path to a separately installed omniget-cli.exe.
+    pub omniget_cli_path: String,
 }
 
 impl Default for Settings {
@@ -71,6 +73,7 @@ impl Default for Settings {
             theme: "system".into(),
             accent: "#f08c28".into(),
             search_engine: "google".into(),
+            omniget_cli_path: String::new(),
         }
     }
 }
@@ -156,6 +159,12 @@ impl Settings {
 
     /// Jaga semua nilai dalam rentang yang didukung UI.
     pub fn normalize(&mut self) {
+        self.omniget_cli_path = self.omniget_cli_path.trim().to_owned();
+        if self.omniget_cli_path.len() > 32768
+            || self.omniget_cli_path.chars().any(char::is_control)
+        {
+            self.omniget_cli_path.clear();
+        }
         if self.hotkey.trim().is_empty() {
             self.hotkey = "Alt+Space".into();
         }

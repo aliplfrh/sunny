@@ -2,6 +2,20 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Unreleased — OmniGet Video Download
+
+- [x] Search-only Video Download command opens inside the launcher, not a browser tab.
+- [x] Separate OmniGet CLI discovery / configurable local path, quality and audio-only
+      selection, progress, cancellation, and Show in Explorer after success.
+- [x] Explicit Settings CLI download/setup with pinned official package SHA-256,
+      atomic allowlisted extraction, automatic path save and advisory dependency checks.
+      Additional engines are prepared by OmniGet when first needed, not silently at startup.
+- [x] Keep one download alive while returning to search or hiding Sunny; restore its
+      state on re-entry. No hotkey changes, remote UI, MCP runtime, or automatic install.
+- [ ] End-to-end managed CLI setup and media download. The official asset HEAD request
+      timed out after 10 seconds on the development machine; no retry loop or live
+      installation was attempted. Local tests use isolated archives/child processes.
+
 ## Release v1.0.9 — Browser activation and QR codes
 
 - [x] Guard repeated Enter/double-click launches while the same external action is pending;

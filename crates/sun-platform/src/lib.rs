@@ -10,6 +10,8 @@ pub use win_space::{is_win_space, WinSpaceObserver};
 mod autostart;
 pub use autostart::set_autostart;
 
+pub mod omniget;
+
 /// Wait for DWM to finish composing a hide/move before capturing the desktop.
 /// Call only from a background capture thread, never from the window event loop.
 #[cfg(windows)]

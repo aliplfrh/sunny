@@ -63,7 +63,7 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
   choose the engine in Settings → Launcher → Quick Web Search
 - **Lorem ipsum** — type `lorem`, `lorem 3 paragraphs`, `lorem 5 sentences`, or `lorem 20 words`;
   press <kbd>Enter</kbd> to copy the generated text
-- **Commands** — Clipboard History, Emoji Picker, Search Files, QR Code Generator, Settings. Each command appears
+- **Commands** — Clipboard History, Emoji Picker, Search Files, QR Code Generator, Video Download, Settings. Each command appears
   only when you search for it; **Search Files** additionally stays hidden while
   *Include Files in Root Search* already covers it
 - **File actions** — for any file row, <kbd>Ctrl</kbd>+<kbd>K</kbd> opens **Open File**,
@@ -72,6 +72,34 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
 - **QR Code Generator** — search `qr code`, open the command, then type text or a URL.
   Press <kbd>Enter</kbd> (or choose **Copy QR Image**) to copy a scannable image locally;
   input is never sent to a QR service (maximum 512 UTF-8 bytes)
+
+### ↓ Video Download (unreleased)
+
+Search **Video Download**, open it, paste an HTTP(S) video URL into Sunny's search
+field, choose a quality (or **Audio only**), then press <kbd>Enter</kbd> or **Download**.
+Progress and cancellation stay inside the launcher—no browser tab or embedded website.
+
+Open **Settings → General → OmniGet Download & Setup → Download OmniGet CLI** to
+download the official Windows CLI (~25 MB). Sunny verifies the pinned SHA-256,
+extracts only **`omniget-cli.exe`** into its local tools folder, and saves its path.
+No installer, GUI, MCP server or downloaded program is launched during setup.
+**Check requirements** reports engine files found in common local locations.
+OmniGet prepares missing yt-dlp, FFmpeg and a JavaScript runtime when needed on the
+first download, so the first request may take longer and needs internet access.
+
+Alternatively, use an existing [OmniGet](https://getomniget.com/download) CLI via
+**Settings → General → OmniGet CLI Path**, or leave the path empty to auto-detect
+it. The GUI `omniget.exe` alone is not sufficient. Nothing downloads or installs
+just by opening Settings; setup requires an explicit click. Custom OmniGet binary
+overrides may not be visible to the advisory requirements check.
+
+Files are saved to your Windows **Downloads** folder. Only clicking Download/pressing
+Enter sends the URL to OmniGet; typing never contacts the site. One download runs at
+a time, continues when Sunny is hidden or you press <kbd>Esc</kbd> to return to search,
+and can be revisited by opening Video Download again. **Cancel** stops the CLI and
+its child processes; quitting Sunny stops active downloads. Partial files can remain.
+Use <kbd>Tab</kbd> to reach quality, Cancel and Show in Explorer. Only download content
+you have permission to save; this integration does not bypass DRM or login restrictions.
 
 ### 📋 Clipboard history
 
@@ -137,6 +165,8 @@ Reopening Sunny clears the previous search and returns to Favorites and Suggesti
 | Open / run / copy | <kbd>Enter</kbd> |
 | Emoji picker | Search **Emoji**, then <kbd>Enter</kbd> |
 | QR code image | Search **QR Code Generator**, enter text, then <kbd>Enter</kbd> |
+| Video download | Search **Video Download**, paste URL, then <kbd>Enter</kbd> |
+| Video controls | <kbd>Tab</kbd> / <kbd>Enter</kbd>; <kbd>Esc</kbd> returns without cancelling |
 | Back to app search | <kbd>Backspace</kbd> |
 | Reveal file in Explorer | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
 | Copy a file's full path | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> |

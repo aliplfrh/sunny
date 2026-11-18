@@ -29,6 +29,16 @@ const launcherStatusEl = document.getElementById("launcherStatus");
 const qrPreviewEl = document.getElementById("qrPreview");
 const qrPromptEl = document.getElementById("qrPrompt");
 const qrCopyEl = document.getElementById("qrCopy");
+const videoPanelEl = document.getElementById("videoPanel");
+const videoSetupEl = document.getElementById("videoSetup");
+const videoQualityEl = document.getElementById("videoQuality");
+const videoStartEl = document.getElementById("videoStart");
+const videoCancelEl = document.getElementById("videoCancel");
+const videoProgressEl = document.getElementById("videoProgress");
+const videoStatusEl = document.getElementById("videoStatus");
+const videoFileEl = document.getElementById("videoFile");
+const videoRevealEl = document.getElementById("videoReveal");
+const videoRetryEl = document.getElementById("videoRetry");
 
 // Satu bundel UI dipakai dua jendela: launcher (`main`) dan Settings
 // (`settings`). Query string membedakan peran keduanya.
@@ -36,7 +46,7 @@ const IS_SETTINGS_WINDOW =
   new URLSearchParams(location.search).get("window") === "settings";
 if (IS_SETTINGS_WINDOW) document.body.classList.add("settings-window");
 
-let mode = "apps"; // "apps" | "emoji" | "clip" | "files"
+let mode = "apps"; // "apps" | "emoji" | "clip" | "files" | "qr" | "video"
 let settingsOpen = false;
 let capturingHotkey = false;
 
@@ -57,6 +67,7 @@ let SETTINGS = {
   file_results: 8,
   theme: "system",
   accent: "#f08c28",
+  omniget_cli_path: "",
 };
 let SETTINGS_ERROR = "";
 let saveTimer = null;
@@ -105,6 +116,16 @@ let fileTotal = 0;
 let refreshSeq = 0; // penjaga balapan hasil pencarian async
 let searchTimer = null;
 let qrReadyText = "";
+let videoInstallation = null;
+let videoChecking = false;
+let videoCheckSeq = 0;
+let videoSubmitting = false;
+let videoCancelling = false;
+let omnigetSetupBusy = false;
+let omnigetSetupMessage = "Download the official Windows CLI (~25 MB). OmniGet prepares additional engines on first use.";
+let omnigetSetupPercent = null;
+let omnigetSetupView = null;
+let videoState = { id: 0, revision: 0, phase: "idle", percent: null, file_path: null, message: "Paste a video URL to begin." };
 
 // Perintah internal — hanya muncul saat dicari (bukan di daftar default).
 const COMMANDS = [
@@ -116,6 +137,8 @@ const COMMANDS = [
     keys: "search files file folder find dokument dokumen berkas" },
   { kind: "cmd", cmd: "qr", icon: "▦", name: "QR Code Generator",
     keys: "qr code qrcode qr generator barcode" },
+  { kind: "cmd", cmd: "video", icon: "↓", name: "Video Download",
+    keys: "video download downloader omniget youtube audio" },
   { kind: "cmd", cmd: "settings", icon: "⚙️", name: "Settings",
     keys: "settings preferences setelan pengaturan" },
 ];
@@ -126,6 +149,7 @@ const MODE_LABEL = {
   clip: "Browse clipboard history…",
   files: "Search files and folders…",
   qr: "Enter text or URL for QR code…",
+  video: "Paste a video URL to download…",
 };
 queryEl.placeholder = MODE_LABEL[mode];
 
@@ -389,6 +413,13 @@ function renderFooter() {
       <span class="hint-action"><kbd>↵</kbd> Copy</span>
       <span class="hint-sep"></span>
       <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
+  } else if (mode === "video") {
+    hintsEl.innerHTML = `
+      <span class="hint-strong">Video Download</span>
+      <span class="spacer"></span>
+      <span class="hint-action"><kbd>↵</kbd> Download</span>
+      <span class="hint-sep"></span>
+      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
   } else if (mode === "qr") {
     hintsEl.innerHTML = `
       <span class="hint-strong">QR Code Generator</span>
@@ -438,12 +469,25 @@ function syncSelectionDom() {
 
 function render() {
   modeBackEl.hidden = mode === "apps";
-  listEl.hidden = mode === "qr";
+  listEl.hidden = mode === "qr" || mode === "video";
+  videoPanelEl.hidden = mode !== "video";
+  if (mode === "video") renderVideo();
   qrPromptEl.hidden = mode !== "qr" || !!qrReadyText;
   qrPreviewEl.hidden = mode !== "qr" || !qrReadyText;
   qrCopyEl.disabled = !qrReadyText;
-  queryEl.setAttribute("aria-controls", mode === "qr" ? "qrPreview" : "list");
-  queryEl.setAttribute("aria-expanded", String(mode !== "qr"));
+  queryEl.setAttribute("aria-controls", mode === "video" ? "videoPanel" : mode === "qr" ? "qrPreview" : "list");
+  queryEl.setAttribute("aria-expanded", String(mode !== "qr" && mode !== "video"));
+  queryEl.setAttribute("aria-label", mode === "video" ? "Video URL" : "Search Sunny");
+  if (mode === "video") {
+    queryEl.removeAttribute("role");
+    queryEl.removeAttribute("aria-expanded");
+    queryEl.removeAttribute("aria-autocomplete");
+    queryEl.setAttribute("aria-describedby", "videoSetup videoStatus");
+  } else {
+    queryEl.setAttribute("role", "combobox");
+    queryEl.setAttribute("aria-autocomplete", "list");
+    queryEl.removeAttribute("aria-describedby");
+  }
   const canAct = hasActions(items[selected]);
   actionsBtnEl.hidden = !canAct;
   actionsBtnEl.disabled = !canAct;
@@ -1192,6 +1236,97 @@ function textValue(text, mono = false) {
   return el("span", "value" + (mono ? " mono" : ""), text);
 }
 
+function omnigetPathControl() {
+  const input = el("input", "omniget-path");
+  input.type = "text";
+  input.value = SETTINGS.omniget_cli_path || "";
+  input.placeholder = "Auto-detect omniget-cli.exe";
+  input.maxLength = 32768;
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "OmniGet CLI executable path");
+  input.dataset.settingsFocus = "omniget_cli_path";
+  input.addEventListener("input", () => onSettingChange({ omniget_cli_path: input.value }));
+  input.addEventListener("blur", flushPendingSave);
+  return input;
+}
+
+function omnigetRequirementSummary(installation) {
+  if (!installation?.available) return "OmniGet CLI not found. Download it here, or set its existing path above.";
+  const missing = Array.isArray(installation.missing_tools) ? installation.missing_tools : [];
+  return missing.length
+    ? `CLI found. Not found in common locations: ${missing.join(", ")}. OmniGet prepares missing engines on first download; custom overrides may already provide them.`
+    : "CLI found. Common download engines were detected; site support and login requirements still depend on OmniGet.";
+}
+
+function updateOmnigetSetupControl() {
+  if (!omnigetSetupView) return;
+  const { wrap, download, check, status, progress } = omnigetSetupView;
+  wrap.setAttribute("aria-busy", String(omnigetSetupBusy));
+  download.disabled = check.disabled = omnigetSetupBusy;
+  download.textContent = omnigetSetupBusy ? "Please wait…" : "Download OmniGet CLI";
+  status.textContent = omnigetSetupMessage;
+  progress.hidden = !omnigetSetupBusy;
+  if (Number.isFinite(omnigetSetupPercent) && omnigetSetupPercent !== null) progress.value = omnigetSetupPercent;
+  else progress.removeAttribute("value");
+}
+
+function omnigetSetupControl() {
+  const wrap = el("div", "omniget-setup");
+  const actions = el("div", "omniget-setup-actions");
+  const download = linkButton("Download OmniGet CLI", downloadOmnigetCli);
+  const check = linkButton("Check requirements", checkOmnigetRequirements);
+  const status = el("p", "omniget-setup-status");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  const progress = el("progress");
+  progress.max = 100;
+  progress.setAttribute("aria-label", "OmniGet CLI download progress");
+  actions.append(download, check);
+  wrap.append(actions, progress, status);
+  omnigetSetupView = { wrap, download, check, status, progress };
+  updateOmnigetSetupControl();
+  return wrap;
+}
+
+async function checkOmnigetRequirements() {
+  if (omnigetSetupBusy) return;
+  omnigetSetupBusy = true;
+  omnigetSetupPercent = null;
+  omnigetSetupMessage = "Checking local requirements…";
+  updateOmnigetSetupControl();
+  try {
+    flushPendingSave();
+    // Flush is debounced; await any write already in flight before checking its path.
+    if (settingsSavePromise) await settingsSavePromise;
+    omnigetSetupMessage = omnigetRequirementSummary(await invoke("video_check"));
+  } catch (error) { omnigetSetupMessage = String(error); }
+  finally { omnigetSetupBusy = false; updateOmnigetSetupControl(); }
+}
+
+async function downloadOmnigetCli() {
+  if (omnigetSetupBusy) return;
+  omnigetSetupBusy = true;
+  omnigetSetupPercent = 0;
+  omnigetSetupMessage = "Downloading and verifying the official OmniGet CLI. No installer will be run…";
+  updateOmnigetSetupControl();
+  try {
+    const installation = await invoke("video_setup");
+    if (!installation?.available || typeof installation.path !== "string" || !installation.path) throw new Error("The downloaded CLI could not be detected.");
+    const error = await onSettingChange({ omniget_cli_path: installation.path }, true);
+    if (error) throw new Error(`CLI downloaded, but its path could not be saved: ${error}`);
+    omnigetSetupMessage = `OmniGet CLI installed. ${omnigetRequirementSummary(installation)}`;
+  } catch (error) { omnigetSetupMessage = String(error); }
+  finally { omnigetSetupBusy = false; omnigetSetupPercent = null; updateOmnigetSetupControl(); }
+}
+
+listen("sunny:omniget-setup", (e) => {
+  if (!omnigetSetupBusy || !e.payload || typeof e.payload.message !== "string") return;
+  omnigetSetupMessage = e.payload.message;
+  omnigetSetupPercent = typeof e.payload.percent === "number" && Number.isFinite(e.payload.percent)
+    ? Math.min(100, Math.max(0, e.payload.percent)) : null;
+  updateOmnigetSetupControl();
+});
+
 /** Status indeks file yang selalu segar (dibaca ulang saat tab dibuka). */
 function indexStatusValue() {
   const span = textValue(fileIndexReady ? `${fileTotal} files` : "Indexing…");
@@ -1299,6 +1434,16 @@ function renderSettings(force = false) {
           "Record a shortcut, or choose Win + Space. Windows may also switch input languages; Sunny never blocks keys.",
           hotkeyControl()
         ),
+        maybeRow(
+          "OmniGet CLI Path",
+          "Local path for Video Download. Download the CLI below, or leave empty to auto-detect an existing installation.",
+          omnigetPathControl()
+        ),
+        maybeRow(
+          "OmniGet Download & Setup",
+          "User-requested download from getomniget.com, SHA-256 checked before extraction. Only the CLI is installed; no GUI or installer is launched.",
+          omnigetSetupControl()
+        ),
       ])
     );
   } else if (settingsTab === "launcher") {
@@ -1399,6 +1544,8 @@ function renderSettings(force = false) {
         maybeRow("Emoji Picker", "Search for the command, then open it.", textValue("Type “emoji” → Enter")),
         maybeRow("QR Code Generator", "Search for QR Code Generator, enter text or a URL, then copy its image.", textValue("Type “qr code” → Enter")),
         maybeRow("Copy QR Image", "In the QR Code Generator view, copy the generated image to the clipboard.", textValue("Enter")),
+        maybeRow("Video Download", "Open the in-box OmniGet panel, paste a URL, choose quality, then press Enter to download.", textValue("Type “video download” → Enter")),
+        maybeRow("Video Controls", "Tab to quality, Download, Cancel or Show in Explorer. Esc returns to search; downloads continue until cancelled or Sunny exits.", textValue("Tab / Enter / Esc")),
         maybeRow("Actions", "Open actions for the selected app or file. Ctrl+K is also available when Vim navigation is off.", textValue("Ctrl + Shift + K")),
         maybeRow("File Path", "Copy the selected file's full path without closing the launcher.", textValue("Ctrl + Shift + C")),
         maybeRow("Back to App Search", "Leave a command view. Backspace also works when its search field is empty and enabled in Keyboard.", textValue("Esc")),
@@ -1710,9 +1857,11 @@ function refreshSettingsView(force = false) {
 }
 
 function acceptSettings(settings) {
+  const previousCli = SETTINGS.omniget_cli_path;
   confirmedSettings = { ...confirmedSettings, ...settings };
   rebaseSettings();
   refreshSettingsView();
+  if (!IS_SETTINGS_WINDOW && mode === "video" && previousCli !== SETTINGS.omniget_cli_path) checkVideoInstallation();
 }
 
 function saveSettings() {
@@ -1818,6 +1967,99 @@ function filesCommandVisible(query) {
   return ["file", "files", "search files", "search file"].some((name) => text.includes(name));
 }
 
+/* ── Optional OmniGet download panel (no remote page or iframe) ── */
+function renderVideo() {
+  if (IS_SETTINGS_WINDOW || mode !== "video") return;
+  const active = videoState.phase === "running";
+  const busy = active || videoSubmitting;
+  videoSetupEl.textContent = videoChecking ? "Checking for OmniGet CLI…"
+    : videoInstallation?.available ? "OmniGet CLI found. First use may prepare yt-dlp, FFmpeg and a JavaScript runtime. Downloads stay here, without a browser tab."
+    : "OmniGet CLI not found. Open Settings → General → OmniGet Download & Setup, or set the path to an existing omniget-cli.exe.";
+  videoStartEl.disabled = busy || !videoInstallation?.available || !queryEl.value.trim();
+  videoStartEl.textContent = videoSubmitting ? "Starting…" : "Download";
+  videoQualityEl.disabled = busy;
+  videoCancelEl.hidden = !active;
+  videoCancelEl.disabled = videoCancelling;
+  videoCancelEl.textContent = videoCancelling ? "Cancelling…" : "Cancel";
+  videoProgressEl.hidden = !active && videoState.phase !== "complete";
+  if (typeof videoState.percent === "number" && Number.isFinite(videoState.percent)) {
+    videoProgressEl.value = Math.max(0, Math.min(100, videoState.percent));
+  } else videoProgressEl.removeAttribute("value");
+  videoStatusEl.textContent = videoState.message || "Paste a video URL to begin.";
+  videoStatusEl.classList.toggle("error", videoState.phase === "failed");
+  videoFileEl.textContent = videoState.phase === "complete" ? videoState.file_path || "" : "";
+  videoFileEl.hidden = !videoFileEl.textContent;
+  videoRevealEl.hidden = videoState.phase !== "complete" || !videoState.file_path;
+  videoRetryEl.disabled = videoChecking;
+}
+
+function acceptVideoStatus(status) {
+  if (IS_SETTINGS_WINDOW || !status || !Number.isSafeInteger(status.id) || status.id < videoState.id) return;
+  if (!["idle", "running", "complete", "failed", "cancelled"].includes(status.phase)) return;
+  if (status.id === videoState.id && (status.revision || 0) < (videoState.revision || 0)) return;
+  videoState = { ...status };
+  if (status.phase !== "running") videoCancelling = false;
+  renderVideo();
+}
+
+async function checkVideoInstallation() {
+  if (IS_SETTINGS_WINDOW) return;
+  const seq = ++videoCheckSeq;
+  videoChecking = true;
+  renderVideo();
+  try {
+    const installation = await invoke("video_check");
+    if (seq === videoCheckSeq) videoInstallation = installation;
+  } catch {
+    if (seq === videoCheckSeq) videoInstallation = null;
+  } finally {
+    if (seq === videoCheckSeq) { videoChecking = false; renderVideo(); }
+  }
+}
+
+async function loadVideo() {
+  if (IS_SETTINGS_WINDOW) return;
+  const results = await Promise.allSettled([checkVideoInstallation(), invoke("video_status")]);
+  if (results[1].status === "fulfilled") acceptVideoStatus(results[1].value);
+  else if (mode === "video") { videoStatusEl.textContent = `Could not load download status: ${results[1].reason}`; }
+}
+
+async function startVideo() {
+  if (IS_SETTINGS_WINDOW || mode !== "video" || videoSubmitting || videoState.phase === "running" || !videoInstallation?.available || !queryEl.value.trim()) return;
+  videoSubmitting = true;
+  const url = queryEl.value.trim();
+  const quality = videoQualityEl.value || "best";
+  renderVideo();
+  try {
+    acceptVideoStatus(await invoke("video_start", { url, quality }));
+  } catch (error) {
+    if (videoState.phase !== "running") videoState = { ...videoState, phase: "failed", message: String(error), file_path: null };
+  } finally {
+    videoSubmitting = false;
+    renderVideo();
+  }
+}
+
+async function cancelVideo() {
+  if (IS_SETTINGS_WINDOW || videoState.phase !== "running" || videoCancelling) return;
+  videoCancelling = true;
+  renderVideo();
+  try { await invoke("video_cancel", { id: videoState.id }); }
+  catch (error) {
+    videoCancelling = false;
+    if (mode === "video") showLauncherError(error);
+    renderVideo();
+  }
+}
+
+listen("sunny:video-progress", (e) => acceptVideoStatus(e.payload));
+videoStartEl?.addEventListener("click", startVideo);
+videoCancelEl?.addEventListener("click", cancelVideo);
+videoRetryEl?.addEventListener("click", checkVideoInstallation);
+videoRevealEl?.addEventListener("click", () => {
+  if (!IS_SETTINGS_WINDOW && videoState.phase === "complete") invoke("video_reveal", { id: videoState.id }).catch(showLauncherError);
+});
+
 /** Draw square modules with a four-module white quiet zone, without any network request. */
 function renderQr(modules) {
   const quiet = 4;
@@ -1863,7 +2105,9 @@ async function refresh() {
   showLauncherError();
 
   try {
-    if (mode === "qr") {
+    if (mode === "video") {
+      // Typing never starts OmniGet or contacts the pasted URL.
+    } else if (mode === "qr") {
       qrReadyText = "";
       if (q) {
         const modules = await invoke("qr_generate", { text: queryEl.value });
@@ -2001,6 +2245,7 @@ async function activate(i) {
     queryEl.value = "";
     queryEl.placeholder = MODE_LABEL[mode];
     refresh();
+    if (mode === "video") loadVideo();
   } else if (item.kind === "clip") {
     // Copy, then paste into the window that had focus before Sunny opened.
     try {
@@ -2104,6 +2349,7 @@ settingsSearchEl.addEventListener("input", () => {
 });
 
 queryEl.addEventListener("input", () => {
+  if (mode === "video") { renderVideo(); return; }
   // Invalidate immediately, not when the timer fires. Enter cannot activate a
   // result belonging to the previous query during the short typing debounce.
   ++refreshSeq;
@@ -2184,6 +2430,18 @@ window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "k" && (e.shiftKey || !SETTINGS.vim_nav)) {
     e.preventDefault();
     toggleActions();
+    return;
+  }
+
+  if (mode === "video") {
+    if (e.key === "Escape" || (e.key === "Backspace" && e.target === queryEl && !queryEl.value && SETTINGS.backspace_back)) {
+      e.preventDefault();
+      backToApps();
+    } else if (e.key === "Enter" && e.target === queryEl) {
+      e.preventDefault();
+      if (!e.repeat) startVideo();
+    }
+    // Tab, arrows and Enter on buttons/selects retain their native behavior.
     return;
   }
 

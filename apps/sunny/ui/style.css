@@ -347,10 +347,49 @@ body.theme-light .about-card img {
 .hint-button:focus-visible,
 .action-item:focus-visible,
 .select:focus-visible,
+.omniget-path:focus-visible,
+.video-panel button:focus-visible,
 input[type="range"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* The downloader uses the existing launcher viewport, including compact mode. */
+.video-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+.video-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.video-heading h2 { font-size: 1.1rem; font-weight: 600; }
+.video-heading span, .video-setup, .video-note { color: var(--text-dim); font-size: .85rem; line-height: 1.5; }
+.video-setup { margin: 8px 0 16px; }
+.video-options, .video-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.video-options .select { min-width: 150px; width: auto; }
+.video-panel button, .omniget-path {
+  font: inherit;
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  padding: 7px 12px;
+}
+.video-panel button { cursor: pointer; }
+.video-panel button:hover:not(:disabled) { background: var(--field-hover); }
+.video-panel button:disabled { opacity: .5; cursor: default; }
+.video-panel #videoStart { border-color: var(--accent-border); background: var(--accent-soft); }
+.video-panel progress { width: 100%; height: 8px; margin-top: 20px; accent-color: var(--accent); }
+.video-status { margin: 16px 0 10px; line-height: 1.5; }
+.video-status.error { color: var(--error); }
+.video-file { color: var(--text-dim); overflow-wrap: anywhere; user-select: text; font-size: .85rem; margin-bottom: 12px; }
+.video-note { margin-top: 16px; }
+.omniget-path { width: 240px; user-select: text; }
+.omniget-setup { width: 280px; max-width: 100%; }
+.omniget-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.omniget-setup-status { margin-top: 8px; color: var(--text-dim); font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
+.omniget-setup progress { width: 100%; height: 6px; margin-top: 10px; accent-color: var(--accent); }
+body.compact .video-panel { padding: 12px 18px; }
 .toolbar-actions {
   display: none;
 }

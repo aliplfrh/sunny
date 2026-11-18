@@ -206,6 +206,11 @@ Two page targets exist — `http://tauri.localhost/` (launcher) and
 - Do not add a snippet/text-expander, an extension system, AI chat, or a store. Out of scope.
 - Do not copy Vicinae's QML or Raycast's assets/text. Port behaviour, redesign the UI.
 - Do not add telemetry, analytics, or network calls other than the update check.
+  The approved exception is user-initiated video downloads via an external OmniGet CLI,
+  with a native Sunny panel (see `docs/decisions/omniget-integration.md`). Settings may
+  download/extract the SHA-256-pinned official CLI only on an explicit click; OmniGet
+  may prepare its video engines on the first user-requested download. No background
+  setup, remote UI, general MCP access, silent installers, or unrelated network features.
 - Do not commit `latest.json`, `target/`, `reference/`, or the updater private key.
 - Do not "fix" the opacity implementation by making the window transparent — opacity is a desktop
   snapshot + tint overlay so that text and icons stay fully opaque.

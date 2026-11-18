@@ -123,6 +123,184 @@ async function fixture({ settingsWindow = false, settings = {}, responses = {} }
   return { run, nodes, events, calls, handlers, settle, key, search, headings, context, dispatch, runTimers };
 }
 
+async function openVideo(f) {
+  await f.search("Video Download");
+  const i = f.run('items.findIndex((item) => item.cmd === "video")');
+  assert.ok(i >= 0, "Video Download command is searchable");
+  await f.run(`activate(${i})`);
+  await f.settle();
+}
+
+const videoIdle = { id: 0, phase: "idle", percent: null, file_path: null, message: "Paste a video URL to begin." };
+
+test("Settings has explicit CLI download and requirements checks, with no automatic setup", async () => {
+  const f = await fixture({ settingsWindow: true });
+  const buttons = f.nodes.settingsBody.querySelectorAll("button");
+  assert.ok(buttons.some((b) => b.textContent === "Download OmniGet CLI"));
+  assert.ok(buttons.some((b) => b.textContent === "Check requirements"));
+  assert.equal(f.calls.some((c) => c.command === "video_setup"), false);
+});
+
+test("CLI setup is single-flight, shows progress, saves its path and never launches an installer", async () => {
+  let finish;
+  const f = await fixture({ settingsWindow: true, responses: {
+    video_setup: () => new Promise((resolve) => { finish = resolve; }),
+    settings_update: ({ settings }) => settings,
+  } });
+  const button = f.nodes.settingsBody.querySelectorAll("button").find((b) => b.textContent === "Download OmniGet CLI");
+  assert.ok(button);
+  const pending = button.click();
+  await f.settle();
+  await button.click();
+  assert.equal(f.calls.filter((c) => c.command === "video_setup").length, 1);
+  f.events["sunny:omniget-setup"]({ payload: { message: "Downloading verified package…", percent: 40 } });
+  assert.equal(f.run("omnigetSetupMessage"), "Downloading verified package…");
+  finish({ available: true, path: "C:\\Sunny\\tools\\omniget-cli.exe", missing_tools: ["yt-dlp", "FFmpeg"] });
+  await pending;
+  await f.settle();
+  assert.equal(f.calls.find((c) => c.command === "settings_update").args.settings.omniget_cli_path, "C:\\Sunny\\tools\\omniget-cli.exe");
+  assert.match(f.run("omnigetSetupMessage"), /yt-dlp/);
+  assert.equal(f.calls.some((c) => ["open_path", "run_app", "video_start"].includes(c.command)), false);
+});
+
+test("failed setup does not change preferences and can be retried", async () => {
+  const f = await fixture({ settingsWindow: true, settings: { omniget_cli_path: "C:\\Existing\\omniget-cli.exe" }, responses: {
+    video_setup: () => { throw new Error("Checksum mismatch"); },
+  } });
+  const button = f.nodes.settingsBody.querySelectorAll("button").find((b) => b.textContent === "Download OmniGet CLI");
+  assert.ok(button);
+  await button.click();
+  await f.settle();
+  assert.match(f.run("omnigetSetupMessage"), /Checksum mismatch/);
+  assert.equal(f.run("omnigetSetupBusy"), false);
+  assert.equal(f.run("SETTINGS.omniget_cli_path"), "C:\\Existing\\omniget-cli.exe");
+  assert.equal(f.calls.some((c) => c.command === "settings_update"), false);
+  await button.click();
+  assert.equal(f.calls.filter((c) => c.command === "video_setup").length, 2);
+});
+
+test("requirements check distinguishes a found CLI from missing video engines without downloading", async () => {
+  const f = await fixture({ settingsWindow: true, responses: {
+    video_check: { available: true, path: "C:\\OmniGet\\omniget-cli.exe", missing_tools: ["FFmpeg", "FFprobe"] },
+  } });
+  const button = f.nodes.settingsBody.querySelectorAll("button").find((b) => b.textContent === "Check requirements");
+  assert.ok(button);
+  await button.click();
+  await f.settle();
+  assert.match(f.run("omnigetSetupMessage"), /FFmpeg.*FFprobe/);
+  assert.equal(f.calls.some((c) => c.command === "video_setup"), false);
+});
+
+test("Video Download opens inside Sunny without launching a tab or fetching a URL", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: true, path: "C:\\OmniGet\\omniget-cli.exe" } } });
+  await openVideo(f);
+  assert.equal(f.run("mode"), "video");
+  assert.equal(f.nodes.videoPanel.hidden, false);
+  assert.equal(f.nodes.list.hidden, true);
+  await f.search("https://example.com/video?");
+  assert.equal(f.calls.some((c) => ["video_start", "web_search", "open_path", "run_app"].includes(c.command)), false);
+});
+
+test("video download starts once on Enter, retains focus, and sends the selected quality", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: true } } });
+  await openVideo(f);
+  f.nodes.videoQuality.value = "720";
+  let finish;
+  f.handlers.video_start = () => new Promise((resolve) => { finish = resolve; });
+  await f.search("https://example.com/video");
+  await f.key("Enter");
+  await f.key("Enter", { repeat: true });
+  await f.nodes.videoStart.click();
+  assert.equal(f.calls.filter((c) => c.command === "video_start").length, 1);
+  const args = f.calls.find((c) => c.command === "video_start").args;
+  assert.equal(args.url, "https://example.com/video");
+  assert.equal(args.quality, "720");
+  finish({ ...videoIdle, id: 1, phase: "running", message: "Starting…" });
+  await f.settle();
+  assert.equal(f.calls.some((c) => c.command === "hide_main_window"), false);
+});
+
+test("video controls use native keyboard behavior and progress cannot overwrite a newer job", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: true } } });
+  await openVideo(f);
+  await f.key("Enter", { target: { tagName: "SELECT" } });
+  assert.equal(f.calls.some((c) => c.command === "video_start"), false);
+  f.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 2, phase: "running", percent: 64, message: "Downloading…" } });
+  f.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 1, phase: "complete", percent: 100 } });
+  assert.equal(f.nodes.videoProgress.value, 64);
+  assert.equal(f.nodes.videoCancel.hidden, false);
+  await f.nodes.videoCancel.click();
+  assert.equal(f.calls.find((c) => c.command === "video_cancel").args.id, 2);
+});
+
+test("video failures and a missing OmniGet installation stay visible inside the panel", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: false, path: null } } });
+  await openVideo(f);
+  assert.match(f.nodes.videoSetup.textContent, /omniget-cli\.exe/i);
+  assert.equal(f.nodes.videoStart.disabled, true);
+  f.handlers.video_check = { available: true };
+  await f.nodes.videoRetry.click();
+  await f.search("https://example.com/video");
+  f.handlers.video_start = () => { throw new Error("Could not start OmniGet"); };
+  await f.key("Enter");
+  assert.match(f.nodes.videoStatus.textContent, /Could not start OmniGet/);
+  assert.equal(f.nodes.videoStart.disabled, false);
+});
+
+test("late video status snapshots cannot restore running state after completion", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: true } } });
+  await openVideo(f);
+  f.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 1, revision: 4, phase: "complete", file_path: "C:\\Downloads\\video.mp4", percent: 100, message: "Saved." } });
+  f.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 1, revision: 0, phase: "running" } });
+  assert.equal(f.nodes.videoReveal.hidden, false);
+  assert.equal(f.nodes.videoCancel.hidden, true);
+  await f.nodes.videoReveal.click();
+  await f.settle();
+  assert.equal(f.calls.find((c) => c.command === "video_reveal").args.id, 1);
+  assert.equal(f.calls.some((c) => c.command === "open_path"), false);
+});
+
+test("changing the CLI path live rechecks installation and URL input has its own accessible label", async () => {
+  const f = await fixture({ responses: { video_status: videoIdle, video_check: { available: false } } });
+  await openVideo(f);
+  const before = f.calls.filter((c) => c.command === "video_check").length;
+  f.handlers.video_check = { available: true };
+  f.events["sunny:settings-updated"]({ payload: { omniget_cli_path: "C:\\OmniGet\\omniget-cli.exe" } });
+  await f.settle();
+  assert.equal(f.calls.filter((c) => c.command === "video_check").length, before + 1);
+  await f.search("https://example.com/video");
+  assert.equal(f.nodes.videoStart.disabled, false);
+  assert.equal(f.nodes.query.getAttribute("aria-label"), "Video URL");
+  assert.equal(f.nodes.query.getAttribute("role"), null);
+  await f.key("Escape");
+  assert.equal(f.nodes.query.getAttribute("role"), "combobox");
+});
+
+test("leaving video mode does not cancel an active download and reopening restores it", async () => {
+  const status = { ...videoIdle, id: 4, phase: "running", percent: 30, message: "Downloading…" };
+  const f = await fixture({ responses: { video_status: status, video_check: { available: true } } });
+  await openVideo(f);
+  await f.key("Escape");
+  assert.equal(f.run("mode"), "apps");
+  assert.equal(f.nodes.videoPanel.hidden, true);
+  assert.equal(f.calls.some((c) => c.command === "video_cancel"), false);
+  await openVideo(f);
+  assert.equal(f.nodes.videoProgress.value, 30);
+  assert.equal(f.nodes.videoCancel.hidden, false);
+});
+
+test("video event text is rendered as text and Settings never checks or starts OmniGet", async () => {
+  const f = await fixture({ settingsWindow: true });
+  assert.equal(f.calls.some((c) => c.command.startsWith("video_")), false);
+  f.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 1, phase: "running", message: "<img src=x onerror=alert(1)>" } });
+  assert.equal(f.calls.some((c) => c.command.startsWith("video_")), false);
+  const launcher = await fixture({ responses: { video_status: videoIdle, video_check: { available: true } } });
+  await openVideo(launcher);
+  launcher.events["sunny:video-progress"]({ payload: { ...videoIdle, id: 1, phase: "failed", message: "<img src=x onerror=alert(1)>" } });
+  assert.equal(launcher.nodes.videoStatus.textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(launcher.nodes.videoStatus.children.length, 0);
+});
+
 test("root emoji prefixes never switch mode; selecting the command opens a persistent emoji view", async () => {
   const f = await fixture();
   await f.search(":smile");

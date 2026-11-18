@@ -66,6 +66,56 @@ pub struct AppState(pub index::SnapshotIndex<sun_core::apps::AppEntry>);
 pub struct SettingsState(pub Mutex<Settings>);
 pub struct SettingsTransactions(pub Mutex<()>);
 
+#[derive(Default)]
+pub struct OmnigetSetupState {
+    busy: std::sync::atomic::AtomicBool,
+    gate: Mutex<()>,
+}
+
+impl OmnigetSetupState {
+    fn reserve<'a>(
+        &'a self,
+        downloads: &sun_core::video::Downloads,
+    ) -> Result<OmnigetSetupGuard<'a>, String> {
+        use std::sync::atomic::Ordering;
+        let _gate = self
+            .gate
+            .lock()
+            .map_err(|_| "OmniGet setup state unavailable.")?;
+        self.busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| "OmniGet setup is already running.")?;
+        let guard = OmnigetSetupGuard(&self.busy);
+        if downloads.status()?.phase == "running" {
+            return Err(
+                "Cancel or finish the active video download before setting up OmniGet.".into(),
+            );
+        }
+        Ok(guard)
+    }
+
+    fn begin_download(
+        &self,
+        downloads: &sun_core::video::Downloads,
+    ) -> Result<(sun_core::video::Status, Arc<std::sync::atomic::AtomicBool>), String> {
+        let _gate = self
+            .gate
+            .lock()
+            .map_err(|_| "OmniGet setup state unavailable.")?;
+        if self.busy.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("Wait for OmniGet setup to finish before starting a download.".into());
+        }
+        downloads.begin()
+    }
+}
+
+struct OmnigetSetupGuard<'a>(&'a std::sync::atomic::AtomicBool);
+impl Drop for OmnigetSetupGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// RAII ownership: replacing this value removes the passive keyboard observer.
 pub struct WinSpaceState(pub Mutex<Option<sun_platform::WinSpaceObserver>>);
 
@@ -348,6 +398,206 @@ async fn qr_copy(text: String) -> Result<(), String> {
         let modules = sun_core::qr::encode(&text)?;
         let (side, pixels) = sun_core::qr::rgba(&modules);
         sun_platform::clipboard_set_image(side, side, pixels)
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+struct OmnigetInstallation {
+    available: bool,
+    path: Option<String>,
+    missing_tools: Vec<String>,
+}
+
+fn omniget_installation(configured: &str) -> OmnigetInstallation {
+    let path = sun_platform::omniget::find_cli(configured);
+    OmnigetInstallation {
+        available: path.is_some(),
+        path: path.map(|p| p.to_string_lossy().into_owned()),
+        missing_tools: sun_platform::omniget::missing_download_tools(),
+    }
+}
+
+#[tauri::command]
+async fn video_check(app: tauri::AppHandle) -> Result<OmnigetInstallation, String> {
+    let configured = app
+        .state::<SettingsState>()
+        .0
+        .lock()
+        .unwrap()
+        .omniget_cli_path
+        .clone();
+    background(move || Ok(omniget_installation(&configured))).await
+}
+
+#[derive(Clone, serde::Serialize)]
+struct OmnigetSetupProgress {
+    message: &'static str,
+    percent: Option<u8>,
+}
+
+fn emit_omniget_setup(app: &tauri::AppHandle, message: &'static str, percent: Option<u8>) {
+    let _ = app.emit(
+        "sunny:omniget-setup",
+        OmnigetSetupProgress { message, percent },
+    );
+}
+
+/// Explicit Settings action: fetch only the pinned official CLI, verify its hash,
+/// and atomically install it. No installer, shell, or downloaded program is run.
+#[tauri::command]
+async fn video_setup(app: tauri::AppHandle) -> Result<OmnigetInstallation, String> {
+    use sun_core::omniget_setup::{MAX_PACKAGE_BYTES, PACKAGE_URL};
+    if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Err("OmniGet setup is available for Windows x64 only.".into());
+    }
+    let state = app.state::<OmnigetSetupState>();
+    // The mutex is held only inside reserve, never across these network awaits.
+    let _guard = state.reserve(&app.state::<sun_core::video::Downloads>())?;
+    let target = sun_platform::omniget::managed_cli_path()
+        .filter(|p| p.is_absolute() && !p.to_string_lossy().starts_with(r"\\"))
+        .ok_or("The local Sunny tools folder is unavailable.")?;
+    emit_omniget_setup(&app, "Downloading official OmniGet CLI (~25 MB)…", Some(0));
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(180))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 3
+                || !sun_core::omniget_setup::allowed_package_url(attempt.url())
+            {
+                attempt.error("OmniGet package redirected outside the trusted download hosts.")
+            } else {
+                attempt.follow()
+            }
+        }))
+        .user_agent(concat!("Sunny/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Could not initialize the secure downloader.")?;
+    let mut response = client.get(PACKAGE_URL).send().await
+        .map_err(|_| "Could not reach the official OmniGet download server. Check your connection and try again.")?
+        .error_for_status().map_err(|_| "The official OmniGet CLI package is currently unavailable. Try again later.")?;
+    let total = response.content_length();
+    if total.map(|n| n > MAX_PACKAGE_BYTES as u64).unwrap_or(false) {
+        return Err(
+            "The OmniGet package exceeds the safe size limit. Nothing was installed.".into(),
+        );
+    }
+    let mut bytes = Vec::new();
+    let mut last_percent = Some(0);
+    let mut reported_at = 0;
+    while let Some(chunk) = response.chunk().await.map_err(|_| {
+        "OmniGet download stalled or was interrupted. Nothing was installed; try again."
+    })? {
+        if chunk.len() > MAX_PACKAGE_BYTES.saturating_sub(bytes.len()) {
+            return Err(
+                "The OmniGet package exceeds the safe size limit. Nothing was installed.".into(),
+            );
+        }
+        bytes.extend_from_slice(&chunk);
+        let percent = total
+            .filter(|n| *n > 0)
+            .map(|n| ((bytes.len() as u64 * 100 / n).min(100)) as u8);
+        if percent != last_percent || bytes.len() - reported_at >= 1024 * 1024 {
+            emit_omniget_setup(&app, "Downloading official OmniGet CLI…", percent);
+            last_percent = percent;
+            reported_at = bytes.len();
+        }
+    }
+    emit_omniget_setup(&app, "Verifying SHA-256 and extracting CLI…", None);
+    let result = background(move || {
+        sun_core::omniget_setup::install_cli_package(&bytes, &target)?;
+        Ok(omniget_installation(&target.to_string_lossy()))
+    })
+    .await?;
+    emit_omniget_setup(
+        &app,
+        "OmniGet CLI installed. Additional engines are prepared on first use.",
+        Some(100),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+fn video_status(
+    downloads: tauri::State<'_, sun_core::video::Downloads>,
+) -> Result<sun_core::video::Status, String> {
+    downloads.status()
+}
+
+#[tauri::command]
+fn video_cancel(
+    id: u64,
+    downloads: tauri::State<'_, sun_core::video::Downloads>,
+) -> Result<(), String> {
+    downloads.cancel(id)
+}
+
+fn emit_video_status(app: &tauri::AppHandle, status: sun_core::video::Status) {
+    let _ = app.emit_to("main", "sunny:video-progress", status);
+}
+
+/// Download explicitly through the separately installed OmniGet CLI, never a shell.
+#[tauri::command]
+async fn video_start(
+    app: tauri::AppHandle,
+    url: String,
+    quality: String,
+) -> Result<sun_core::video::Status, String> {
+    use sun_core::video::Downloads;
+    let configured = app
+        .state::<SettingsState>()
+        .0
+        .lock()
+        .unwrap()
+        .omniget_cli_path
+        .clone();
+    background(move || {
+        let output = app.path().download_dir().map_err(|_| "Windows Downloads folder is unavailable.")?;
+        let args = sun_core::video::download_args(&url, &quality, &output.to_string_lossy())?;
+        let path = sun_platform::omniget::find_cli(&configured).ok_or("OmniGet CLI was not found. Install OmniGet and select omniget-cli.exe in Settings → General.")?;
+        let (status, cancel) = app.state::<OmnigetSetupState>().begin_download(&app.state::<Downloads>())?;
+        let id = status.id;
+        let worker = app.clone();
+        let started = std::thread::Builder::new().name("sunny-video-download".into()).spawn(move || {
+            let result = sun_platform::omniget::download(&path, &args, cancel, |line| {
+                if let Some(update) = sun_core::video::parse_line(line) {
+                    if let Some(status) = worker.state::<Downloads>().update(id, update) {
+                        emit_video_status(&worker, status);
+                    }
+                }
+            });
+            if let Some(status) = worker.state::<Downloads>().finish(id, result) {
+                emit_video_status(&worker, status);
+            }
+        });
+        if started.is_err() {
+            let message = "Could not start the download worker.".to_string();
+            if let Some(status) = app.state::<Downloads>().finish(id, Err(message.clone())) {
+                emit_video_status(&app, status);
+            }
+            return Err(message);
+        }
+        Ok(status)
+    }).await
+}
+
+#[tauri::command]
+async fn video_reveal(app: tauri::AppHandle, id: u64) -> Result<(), String> {
+    let status = app.state::<sun_core::video::Downloads>().status()?;
+    if status.id != id || status.phase != "complete" {
+        return Err("There is no completed download to reveal.".into());
+    }
+    let path = status
+        .file_path
+        .ok_or("The saved file path is unavailable.")?;
+    background(move || {
+        let file = std::path::Path::new(&path);
+        if !file.is_absolute() || path.starts_with(r"\\") || !file.is_file() {
+            return Err("The downloaded file could not be found on this computer.".into());
+        }
+        reveal_path(path)
     })
     .await
 }
@@ -830,6 +1080,8 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(AppState(index::SnapshotIndex::default()))
         .manage(ClipboardStore::new())
+        .manage(sun_core::video::Downloads::default())
+        .manage(OmnigetSetupState::default())
         .manage(SettingsState(Mutex::new(Settings::load())))
         .manage(SettingsTransactions(Mutex::new(())))
         .manage(LauncherState(Mutex::new(
@@ -868,6 +1120,12 @@ fn main() {
             copy_to_clipboard,
             qr_generate,
             qr_copy,
+            video_check,
+            video_setup,
+            video_status,
+            video_start,
+            video_cancel,
+            video_reveal,
             clip_history,
             clip_pause_state,
             clip_toggle_pause,
@@ -1098,6 +1356,20 @@ fn main() {
 #[cfg(test)]
 mod command_tests {
     use super::*;
+
+    #[test]
+    fn setup_and_video_download_are_mutually_exclusive_and_release_their_reservations() {
+        let setup = OmnigetSetupState::default();
+        let jobs = sun_core::video::Downloads::default();
+        let guard = setup.reserve(&jobs).unwrap();
+        assert!(setup.reserve(&jobs).is_err());
+        assert!(setup.begin_download(&jobs).is_err());
+        drop(guard);
+        let (job, _) = setup.begin_download(&jobs).unwrap();
+        assert!(setup.reserve(&jobs).is_err());
+        jobs.finish(job.id, Err("fixture failure".into()));
+        assert!(setup.reserve(&jobs).is_ok());
+    }
 
     #[test]
     fn login_start_is_background_only_and_explicit() {

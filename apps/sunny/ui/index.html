@@ -99,6 +99,31 @@
           <button type="button" id="qrCopy" disabled>Copy QR Image</button>
         </section>
         <aside class="detail" id="detail" hidden></aside>
+        <section class="video-panel" id="videoPanel" aria-labelledby="videoTitle" hidden>
+          <div class="video-heading"><h2 id="videoTitle">Video Download</h2><span>Powered by OmniGet</span></div>
+          <p class="video-setup" id="videoSetup">Checking for OmniGet CLI…</p>
+          <div class="video-options">
+            <label for="videoQuality">Quality</label>
+            <select class="select" id="videoQuality">
+              <option value="best">Best available</option>
+              <option value="2160">Up to 4K</option>
+              <option value="1080">Up to 1080p</option>
+              <option value="720">Up to 720p</option>
+              <option value="480">Up to 480p</option>
+              <option value="audio">Audio only</option>
+            </select>
+            <button id="videoStart" type="button" disabled>Download</button>
+            <button id="videoCancel" type="button" hidden>Cancel</button>
+          </div>
+          <progress id="videoProgress" max="100" aria-label="Download progress" hidden></progress>
+          <p id="videoStatus" class="video-status" role="status" aria-live="polite">Paste a video URL to begin.</p>
+          <p id="videoFile" class="video-file" hidden></p>
+          <div class="video-actions">
+            <button id="videoReveal" type="button" hidden>Show in Explorer</button>
+            <button id="videoRetry" type="button">Check installation</button>
+          </div>
+          <p class="video-note">Saved to Downloads. Only download content you have permission to save. Esc returns to search without cancelling.</p>
+        </section>
       </main>
 
       <div class="launcher-status" id="launcherStatus" role="alert" hidden></div>
