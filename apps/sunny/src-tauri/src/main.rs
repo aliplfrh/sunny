@@ -77,10 +77,6 @@ pub struct WindowShows {
 
 pub struct LauncherState(pub Mutex<sun_core::launcher::LauncherHistory>);
 
-/// Panel Settings kini jendela terpisah; penanda ini dipertahankan agar
-/// mode Compact/Expanded tidak diterapkan saat setelan dibuka.
-pub struct SettingsUiOpen(pub std::sync::atomic::AtomicBool);
-
 /// Snapshot desktop di belakang launcher (data URL PNG) untuk backdrop CSS.
 pub struct BackdropState(pub Mutex<Option<String>>);
 
@@ -123,13 +119,6 @@ fn capture_window_backdrop(app: &tauri::AppHandle, label: &str) -> Option<String
 
 /// Ubah ukuran jendela sesuai mode (Compact/Expanded) lalu pusatkan kembali.
 fn apply_window_mode(app: &tauri::AppHandle, settings: &Settings) {
-    if app
-        .state::<SettingsUiOpen>()
-        .0
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
-        return; // panel Settings sedang memakai jendela tinggi
-    }
     if let Some(window) = app.get_webview_window("main") {
         let target_w = 720.0;
         let target_h = settings.window_height();
@@ -216,7 +205,13 @@ async fn search_apps(
     query: String,
     app: tauri::AppHandle,
 ) -> Result<Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>>, String> {
-    background(move || Ok(sun_core::search::rank(&query, &app_index(&app)?))).await
+    background(move || {
+        let mut hits = sun_core::search::rank(&query, &app_index(&app)?);
+        // Icons dominate the payload; only the best matches are ever rendered.
+        hits.truncate(60);
+        Ok(hits)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -260,17 +255,13 @@ async fn run_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
         launching_app(&path)?;
         // The application is already open; a history write failure must not be
         // reported as a launch failure (that would invite a duplicate launch).
-        if let Ok(state) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            app.state::<LauncherState>()
-        })) {
-            if let Ok(mut history) = state.0.lock() {
-                if let Err(error) = history.record_launch(&path) {
-                    let _ = app.emit_to(
-                        "main",
-                        "sunny:launcher-warning",
-                        format!("Application opened, but its usage could not be saved: {error}"),
-                    );
-                }
+        if let Ok(mut history) = app.state::<LauncherState>().0.lock() {
+            if let Err(error) = history.record_launch(&path) {
+                let _ = app.emit_to(
+                    "main",
+                    "sunny:launcher-warning",
+                    format!("Application opened, but its usage could not be saved: {error}"),
+                );
             }
         }
         Ok(())
@@ -331,15 +322,34 @@ async fn web_search(query: String, engine_id: String) -> Result<String, String> 
     .await
 }
 
-/// Salin teks ke clipboard (fallback bila JS clipboard API gagal).
+/// Copy text to the clipboard (fallback when the WebView clipboard API fails).
 #[tauri::command]
-fn copy_to_clipboard(text: String) -> Result<(), String> {
-    match arboard::Clipboard::new() {
-        Ok(mut cb) => cb
+async fn copy_to_clipboard(text: String) -> Result<(), String> {
+    background(move || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
+        clipboard
             .set_text(&text)
-            .map_err(|e| format!("clipboard gagal: {e}")),
-        Err(e) => Err(format!("clipboard tidak tersedia: {e}")),
-    }
+            .map_err(|e| format!("Could not copy to the clipboard: {e}"))
+    })
+    .await
+}
+
+/// Generate a QR matrix locally. No URL or input leaves Sunny.
+#[tauri::command]
+async fn qr_generate(text: String) -> Result<Vec<Vec<bool>>, String> {
+    background(move || sun_core::qr::encode(&text)).await
+}
+
+/// Copy the generated QR as an opaque RGBA image to the Windows clipboard.
+#[tauri::command]
+async fn qr_copy(text: String) -> Result<(), String> {
+    background(move || {
+        let modules = sun_core::qr::encode(&text)?;
+        let (side, pixels) = sun_core::qr::rgba(&modules);
+        sun_platform::clipboard_set_image(side, side, pixels)
+    })
+    .await
 }
 
 /// Seluruh riwayat clipboard (terbaru dulu) lengkap dengan metadata.
@@ -360,32 +370,47 @@ fn clip_toggle_pause(store: tauri::State<'_, ClipboardStore>) -> bool {
     store.toggle_pause()
 }
 
-/// Hapus satu entri riwayat berdasar id.
+/// Remove one clipboard entry and persist the change.
 #[tauri::command]
-fn clip_delete(id: u64, store: tauri::State<'_, ClipboardStore>) -> bool {
+fn clip_delete(
+    id: u64,
+    app: tauri::AppHandle,
+    store: tauri::State<'_, ClipboardStore>,
+) -> Result<bool, String> {
     let deleted = store.delete(id);
     if deleted {
-        store.save();
+        if let Err(error) = store.save() {
+            let _ = app.emit_to(
+                "main",
+                "sunny:launcher-warning",
+                format!("Entry removed, but the clipboard history could not be saved: {error}"),
+            );
+        }
     }
-    deleted
+    Ok(deleted)
 }
 
-/// Salin teks lalu tempelkan ke jendela aktif sebelumnya (ala Raycast):
-/// set clipboard → sembunyikan launcher (fokus kembali ke app sebelumnya) →
-/// kirim Ctrl+V. Best-effort: bila SendInput gagal, teks tetap tersalin.
+/// Copy text, hide the launcher so focus returns to the previous window, then
+/// press Ctrl+V. Best effort: if SendInput fails, the text stays copied.
 #[tauri::command]
-fn paste_to_active_window(app: tauri::AppHandle, text: String) -> Result<(), String> {
+async fn paste_to_active_window(app: tauri::AppHandle, text: String) -> Result<(), String> {
     {
-        let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-        cb.set_text(&text).map_err(|e| format!("clipboard: {e}"))?;
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
+        clipboard
+            .set_text(&text)
+            .map_err(|e| format!("Could not copy to the clipboard: {e}"))?;
     }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
-    // Beri waktu OS memindahkan fokus ke jendela sebelumnya sebelum Ctrl+V.
-    std::thread::sleep(std::time::Duration::from_millis(220));
-    let _ = sun_platform::send_paste();
-    Ok(())
+    background(move || {
+        // Give the OS time to move focus back before sending Ctrl+V.
+        std::thread::sleep(std::time::Duration::from_millis(220));
+        let _ = sun_platform::send_paste();
+        Ok(())
+    })
+    .await
 }
 
 /// Dataset emoji penuh (dicache khusus backend; disaring di frontend).
@@ -439,8 +464,19 @@ fn rebuild_file_index(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let files = sun_core::files::build_index();
         if let Some(st) = handle.try_state::<FileIndexState>() {
-            *st.files.lock().unwrap() = Arc::new(files);
-            st.ready.store(true, Ordering::Relaxed);
+            match st.files.lock() {
+                Ok(mut slot) => {
+                    *slot = Arc::new(files);
+                    st.ready.store(true, Ordering::Relaxed);
+                }
+                Err(_) => {
+                    let _ = handle.emit_to(
+                        "main",
+                        "sunny:launcher-warning",
+                        "The file index could not be updated. Rebuild it in Settings.",
+                    );
+                }
+            }
         }
         let _ = handle.emit("sunny:files-updated", ());
     });
@@ -448,8 +484,8 @@ fn rebuild_file_index(app: tauri::AppHandle) {
 
 /// Buka file dengan aplikasi default (ShellExecuteW; aman untuk semua nama file).
 #[tauri::command]
-fn open_path(path: String) -> Result<(), String> {
-    sun_platform::shell_open(&path)
+async fn open_path(path: String) -> Result<(), String> {
+    background(move || sun_platform::shell_open(&path)).await
 }
 
 /// Tampilkan file terpilih di File Explorer (ala "Show in Finder").
@@ -801,7 +837,6 @@ fn main() {
         )))
         .manage(WinSpaceState(Mutex::new(None)))
         .manage(WindowShows::default())
-        .manage(SettingsUiOpen(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackdropState(Mutex::new(None)))
         .manage(SettingsBackdropState(Mutex::new(None)))
         .manage(FileIndexState {
@@ -831,6 +866,8 @@ fn main() {
             search_engines,
             web_search,
             copy_to_clipboard,
+            qr_generate,
+            qr_copy,
             clip_history,
             clip_pause_state,
             clip_toggle_pause,
@@ -866,11 +903,18 @@ fn main() {
                 eprintln!("Sunny startup registration: {error}");
             }
 
-            // Hotkey tersimpan; fallback ke default bila gagal (mis. sudah dipakai).
+            // Saved hotkey first, then the existing Alt+Space fallback. Never
+            // abort startup: the tray can still open Sunny and Settings.
             if register_hotkey(app.handle(), &active.hotkey).is_err() {
-                register_hotkey(app.handle(), "Alt+Space").map_err(std::io::Error::other)?;
-                // Keep the in-memory value aligned with the binding that actually works.
-                app.state::<SettingsState>().0.lock().unwrap().hotkey = "Alt+Space".into();
+                match register_hotkey(app.handle(), "Alt+Space") {
+                    Ok(()) => {
+                        // Keep the in-memory value aligned with the working binding.
+                        app.state::<SettingsState>().0.lock().unwrap().hotkey = "Alt+Space".into();
+                    }
+                    Err(error) => eprintln!(
+                        "Sunny could not register a global hotkey ({error}); open it from the tray."
+                    ),
+                }
             }
             apply_window_mode(app.handle(), &active);
 
@@ -990,7 +1034,15 @@ fn main() {
                         if let Ok(mut cb) = arboard::Clipboard::new() {
                             if let Ok(text) = cb.get_text() {
                                 if store.push(&text) {
-                                    store.save();
+                                    if let Err(error) = store.save() {
+                                        let _ = handle.emit_to(
+                                            "main",
+                                            "sunny:launcher-warning",
+                                            format!(
+                                                "Clipboard history could not be saved: {error}"
+                                            ),
+                                        );
+                                    }
                                     let _ = handle.emit("sunny:clip-updated", ());
                                 }
                             }
@@ -1007,8 +1059,19 @@ fn main() {
                 std::thread::spawn(move || {
                     let files = sun_core::files::build_index();
                     if let Some(st) = handle.try_state::<FileIndexState>() {
-                        *st.files.lock().unwrap() = Arc::new(files);
-                        st.ready.store(true, std::sync::atomic::Ordering::Relaxed);
+                        match st.files.lock() {
+                            Ok(mut slot) => {
+                                *slot = Arc::new(files);
+                                st.ready.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                let _ = handle.emit_to(
+                                    "main",
+                                    "sunny:launcher-warning",
+                                    "The file index could not be built.",
+                                );
+                            }
+                        }
                     }
                     let _ = handle.emit("sunny:files-updated", ());
                 });

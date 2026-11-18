@@ -63,12 +63,15 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
   choose the engine in Settings → Launcher → Quick Web Search
 - **Lorem ipsum** — type `lorem`, `lorem 3 paragraphs`, `lorem 5 sentences`, or `lorem 20 words`;
   press <kbd>Enter</kbd> to copy the generated text
-- **Commands** — Clipboard History, Emoji Picker, Search Files, Settings. Each command appears
+- **Commands** — Clipboard History, Emoji Picker, Search Files, QR Code Generator, Settings. Each command appears
   only when you search for it; **Search Files** additionally stays hidden while
   *Include Files in Root Search* already covers it
 - **File actions** — for any file row, <kbd>Ctrl</kbd>+<kbd>K</kbd> opens **Open File**,
   **Copy Full Path**, and **Show in Explorer**; the path copy and reveal work from both the
   dedicated Files view and the Files section of a normal search
+- **QR Code Generator** — search `qr code`, open the command, then type text or a URL.
+  Press <kbd>Enter</kbd> (or choose **Copy QR Image**) to copy a scannable image locally;
+  input is never sent to a QR service (maximum 512 UTF-8 bytes)
 
 ### 📋 Clipboard history
 
@@ -133,6 +136,7 @@ Reopening Sunny clears the previous search and returns to Favorites and Suggesti
 | Navigate results | <kbd>↑</kbd> <kbd>↓</kbd> |
 | Open / run / copy | <kbd>Enter</kbd> |
 | Emoji picker | Search **Emoji**, then <kbd>Enter</kbd> |
+| QR code image | Search **QR Code Generator**, enter text, then <kbd>Enter</kbd> |
 | Back to app search | <kbd>Backspace</kbd> |
 | Reveal file in Explorer | <kbd>Ctrl</kbd>+<kbd>R</kbd> |
 | Copy a file's full path | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> |

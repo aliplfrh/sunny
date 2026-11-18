@@ -27,7 +27,11 @@ pub fn all() -> &'static [EmojiItem] {
             name: String,
             keywords: String,
         }
-        let raw: Vec<Raw> = serde_json::from_str(EMOJI_JSON).expect("emojis.json rusak");
+        let raw: Vec<Raw> = serde_json::from_str(EMOJI_JSON).unwrap_or_else(|error| {
+            // A damaged dataset must degrade to an empty picker, not panic.
+            eprintln!("Emoji dataset could not be parsed: {error}");
+            Vec::new()
+        });
         raw.into_iter()
             .map(
                 |Raw {

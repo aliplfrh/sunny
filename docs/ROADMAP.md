@@ -2,6 +2,14 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Release v1.0.9 — Browser activation and QR codes
+
+- [x] Guard repeated Enter/double-click launches while the same external action is pending;
+      errors remain visible and allow retry; reopen resets the guard.
+- [x] Offline QR Code Generator command for text/URLs, preview with a quiet zone, and copy
+      the QR image to the clipboard. No QR web service or frontend build step.
+- [ ] Live Windows verification of browser tab count and QR image scanning/clipboard paste.
+
 ## Release v1.0.8 — File actions
 
 - [x] **File actions** — <kbd>Ctrl</kbd>+<kbd>K</kbd> on a file row opens *Open File*,

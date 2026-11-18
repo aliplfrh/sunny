@@ -8,6 +8,7 @@ description = "Abstraksi platform Sunny (Windows dulu): hotkey, jendela, clipboa
 [dependencies]
 
 [target."cfg(windows)".dependencies]
+arboard = "3"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

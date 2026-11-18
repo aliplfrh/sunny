@@ -11,6 +11,7 @@ pub mod emoji;
 pub mod files;
 pub mod launcher;
 pub mod lorem;
+pub mod qr;
 pub mod search;
 pub mod settings;
 pub mod websearch;

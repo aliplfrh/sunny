@@ -14,3 +14,4 @@ meval = "0.2"
 md-5 = "0.10"
 dirs = "6"
 urlencoding = "2"
+qrcode = { version = "0.14", default-features = false }

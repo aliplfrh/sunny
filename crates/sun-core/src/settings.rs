@@ -460,14 +460,20 @@ mod search_engine_tests {
 
     #[test]
     fn unknown_search_engine_falls_back_to_google() {
-        let mut s = Settings { search_engine: "not-real".into(), ..Default::default() };
+        let mut s = Settings {
+            search_engine: "not-real".into(),
+            ..Default::default()
+        };
         s.normalize();
         assert_eq!(s.search_engine, "google");
     }
 
     #[test]
     fn known_search_engine_is_preserved() {
-        let mut s = Settings { search_engine: "duckduckgo".into(), ..Default::default() };
+        let mut s = Settings {
+            search_engine: "duckduckgo".into(),
+            ..Default::default()
+        };
         s.normalize();
         assert_eq!(s.search_engine, "duckduckgo");
     }

@@ -53,6 +53,7 @@
   --scroll-thumb: rgba(255, 255, 255, 0.12);
   --option-bg: #1b1b21;
   --error: #ff8f7a;
+  --qr-paper: #ffffff; /* QR stays high contrast in both themes. */
   --menu-shadow: rgba(0, 0, 0, 0.28);
 
   /* Skala tipografi tunggal — diatur oleh setelan "Font size". */
@@ -272,6 +273,47 @@ body.theme-light .about-card img {
   padding: 8px;
 }
 
+.qr-preview {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.qr-prompt {
+  flex: 1;
+  align-self: center;
+  color: var(--text-dim);
+  padding: 12px;
+  text-align: center;
+}
+.qr-preview[hidden] { display: none; }
+.qr-preview canvas {
+  width: min(240px, 55vh);
+  height: auto;
+  max-width: 100%;
+  background: var(--qr-paper);
+  image-rendering: pixelated;
+}
+.qr-preview button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.qr-preview button:disabled { opacity: 0.5; cursor: default; }
+.qr-preview button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .result-heading {
   padding: 9px 12px 6px;
   color: var(--text-dim);
@@ -303,7 +345,9 @@ body.theme-light .about-card img {
 .mode-back:focus-visible,
 .toolbar-actions:focus-visible,
 .hint-button:focus-visible,
-.action-item:focus-visible {
+.action-item:focus-visible,
+.select:focus-visible,
+input[type="range"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

@@ -26,6 +26,9 @@ const modeBackEl = document.getElementById("modeBack");
 const actionsEl = document.getElementById("actions");
 const actionsBtnEl = document.getElementById("actionsBtn");
 const launcherStatusEl = document.getElementById("launcherStatus");
+const qrPreviewEl = document.getElementById("qrPreview");
+const qrPromptEl = document.getElementById("qrPrompt");
+const qrCopyEl = document.getElementById("qrCopy");
 
 // Satu bundel UI dipakai dua jendela: launcher (`main`) dan Settings
 // (`settings`). Query string membedakan peran keduanya.
@@ -89,6 +92,7 @@ let homeSeq = 0;
 let actionsOpen = false;
 let actionSelected = 0;
 let favoriteBusy = false;
+let activating = false; // Prevent repeated external launches until reopened or an error.
 
 // ── State khusus mode clipboard ──
 let paused = false; // watcher pause?
@@ -100,6 +104,7 @@ let fileIndexReady = false;
 let fileTotal = 0;
 let refreshSeq = 0; // penjaga balapan hasil pencarian async
 let searchTimer = null;
+let qrReadyText = "";
 
 // Perintah internal — hanya muncul saat dicari (bukan di daftar default).
 const COMMANDS = [
@@ -109,6 +114,8 @@ const COMMANDS = [
     keys: "emoji picker emotikon" },
   { kind: "cmd", cmd: "files", icon: "📁", name: "Search Files",
     keys: "search files file folder find dokument dokumen berkas" },
+  { kind: "cmd", cmd: "qr", icon: "▦", name: "QR Code Generator",
+    keys: "qr code qrcode qr generator barcode" },
   { kind: "cmd", cmd: "settings", icon: "⚙️", name: "Settings",
     keys: "settings preferences setelan pengaturan" },
 ];
@@ -118,6 +125,7 @@ const MODE_LABEL = {
   emoji: "Search emoji…",
   clip: "Browse clipboard history…",
   files: "Search files and folders…",
+  qr: "Enter text or URL for QR code…",
 };
 queryEl.placeholder = MODE_LABEL[mode];
 
@@ -183,7 +191,11 @@ function hideWindow() {
     invoke("settings_close").catch(() => {});
     return;
   }
-  invoke("hide_main_window");
+  invoke("hide_main_window").catch((error) => {
+    // A failed hide must not leave every later launch blocked by the guard.
+    activating = false;
+    showLauncherError(`Could not hide Sunny: ${error}`);
+  });
 }
 
 /* ── Util tampilan ala Raycast ─────────────────────────── */
@@ -286,7 +298,7 @@ function iconElFor(item) {
     icon.classList.add("emoji");
     icon.textContent = item.emoji;
   } else if (item.kind === "clip") {
-    icon.classList.add(item.kind === "clip" && item.kind2 === "image" ? "type-image" : "type-text");
+    icon.classList.add(item.kind2 === "image" ? "type-image" : "type-text");
     icon.textContent = item.kind2 === "image" ? "🖼" : "T";
   } else if (item.kind === "file") {
     icon.classList.add("file");
@@ -367,12 +379,21 @@ function renderFooter() {
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Paste</span>
       <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>B</kbd> Actions</span>`;
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>B</kbd> Copy</span>
+      <span class="hint-sep"></span>
+      <span class="hint-action"><kbd>Ctrl</kbd><kbd>D</kbd> Delete</span>`;
   } else if (mode === "emoji") {
     hintsEl.innerHTML = `
       <span class="hint-strong">Emoji Picker</span>
       <span class="spacer"></span>
       <span class="hint-action"><kbd>↵</kbd> Copy</span>
+      <span class="hint-sep"></span>
+      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
+  } else if (mode === "qr") {
+    hintsEl.innerHTML = `
+      <span class="hint-strong">QR Code Generator</span>
+      <span class="spacer"></span>
+      <span class="hint-action"><kbd>↵</kbd> Copy Image</span>
       <span class="hint-sep"></span>
       <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
   } else if (mode === "files") {
@@ -396,8 +417,33 @@ function renderFooter() {
   hintsEl.querySelector("[data-back]")?.addEventListener("click", backToApps);
 }
 
+/* Move the highlight without rebuilding rows, so icons are not re-decoded. */
+function syncSelectionDom() {
+  [...listEl.querySelectorAll(".item")].forEach((el, j) => {
+    el.classList.toggle("selected", j === selected);
+    el.setAttribute("aria-selected", String(j === selected));
+  });
+  const item = items[selected];
+  if (item) queryEl.setAttribute("aria-activedescendant", `result-${selected}`);
+  else queryEl.removeAttribute("aria-activedescendant");
+  const canAct = hasActions(item);
+  actionsBtnEl.hidden = !canAct;
+  actionsBtnEl.disabled = !canAct;
+  const title = item ? actionsTitle(item) : "Actions";
+  actionsBtnEl.title = `${title} (Ctrl+K)`;
+  actionsBtnEl.setAttribute("aria-label", title);
+  renderFooter();
+  if (mode === "clip") renderDetail(item || null);
+}
+
 function render() {
   modeBackEl.hidden = mode === "apps";
+  listEl.hidden = mode === "qr";
+  qrPromptEl.hidden = mode !== "qr" || !!qrReadyText;
+  qrPreviewEl.hidden = mode !== "qr" || !qrReadyText;
+  qrCopyEl.disabled = !qrReadyText;
+  queryEl.setAttribute("aria-controls", mode === "qr" ? "qrPreview" : "list");
+  queryEl.setAttribute("aria-expanded", String(mode !== "qr"));
   const canAct = hasActions(items[selected]);
   actionsBtnEl.hidden = !canAct;
   actionsBtnEl.disabled = !canAct;
@@ -511,16 +557,7 @@ function render() {
       if (actionsOpen) return;
       if (selected !== i) {
         selected = i;
-        [...listEl.querySelectorAll(".item")].forEach((el, j) => {
-          el.classList.toggle("selected", j === i);
-          el.setAttribute("aria-selected", String(j === i));
-        });
-        queryEl.setAttribute("aria-activedescendant", `result-${i}`);
-        const canAct = hasActions(item);
-        actionsBtnEl.hidden = !canAct;
-        actionsBtnEl.disabled = !canAct;
-        renderFooter();
-        if (mode === "clip") renderDetail(items[i]);
+        syncSelectionDom();
       }
     };
     groupEl.appendChild(row);
@@ -549,6 +586,19 @@ function showLauncherNote(text) {
   launcherStatusEl.textContent = text;
   launcherStatusEl.hidden = false;
   launcherStatusEl.classList.add("info");
+}
+
+/** Copy through the WebView API, falling back to the native clipboard. */
+async function copyText(text) {
+  const copied = await navigator.clipboard?.writeText(text).then(() => true).catch(() => false);
+  if (copied) return true;
+  try {
+    await invoke("copy_to_clipboard", { text });
+    return true;
+  } catch (error) {
+    showLauncherError(`Could not copy: ${error}`);
+    return false;
+  }
 }
 
 function isFavorite(path) {
@@ -664,6 +714,7 @@ function toggleActions() {
 
 function backToApps() {
   closeActions(false);
+  qrReadyText = "";
   mode = "apps";
   queryEl.value = "";
   queryEl.placeholder = MODE_LABEL.apps;
@@ -954,12 +1005,17 @@ function accentControl(onChange) {
   return wrap;
 }
 
-function segmentControl(options, value, onChange) {  const wrap = el("div", "segment");
+function segmentControl(options, value, onChange) {
+  const wrap = el("div", "segment");
   for (const [val, label] of options) {
     const b = el("button", val === value ? "on" : "", label);
     b.type = "button";
+    b.setAttribute("aria-pressed", String(val === value));
     b.onclick = () => {
-      [...wrap.children].forEach((c) => c.classList.toggle("on", c === b));
+      [...wrap.children].forEach((c) => {
+        c.classList.toggle("on", c === b);
+        c.setAttribute("aria-pressed", String(c === b));
+      });
       onChange(val);
     };
     wrap.appendChild(b);
@@ -1341,6 +1397,8 @@ function renderSettings(force = false) {
       settingsSectionFiltered("In the Launcher", [
         maybeRow("Open Settings", "Jump straight to this panel.", textValue("Ctrl + ,")),
         maybeRow("Emoji Picker", "Search for the command, then open it.", textValue("Type “emoji” → Enter")),
+        maybeRow("QR Code Generator", "Search for QR Code Generator, enter text or a URL, then copy its image.", textValue("Type “qr code” → Enter")),
+        maybeRow("Copy QR Image", "In the QR Code Generator view, copy the generated image to the clipboard.", textValue("Enter")),
         maybeRow("Actions", "Open actions for the selected app or file. Ctrl+K is also available when Vim navigation is off.", textValue("Ctrl + Shift + K")),
         maybeRow("File Path", "Copy the selected file's full path without closing the launcher.", textValue("Ctrl + Shift + C")),
         maybeRow("Back to App Search", "Leave a command view. Backspace also works when its search field is empty and enabled in Keyboard.", textValue("Esc")),
@@ -1760,6 +1818,39 @@ function filesCommandVisible(query) {
   return ["file", "files", "search files", "search file"].some((name) => text.includes(name));
 }
 
+/** Draw square modules with a four-module white quiet zone, without any network request. */
+function renderQr(modules) {
+  const quiet = 4;
+  const scale = 4;
+  const size = (modules.length + quiet * 2) * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  canvas.dataset.size = String(modules.length);
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "QR code for the entered text");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is unavailable for the QR preview.");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = "#000";
+  modules.forEach((row, y) => row.forEach((dark, x) => {
+    if (dark) ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+  }));
+  qrPreviewEl.querySelector("canvas")?.remove();
+  qrPreviewEl.insertBefore(canvas, qrCopyEl);
+}
+
+async function copyQr() {
+  if (mode !== "qr" || !qrReadyText || qrReadyText !== queryEl.value) return;
+  try {
+    await invoke("qr_copy", { text: qrReadyText });
+    showLauncherNote("QR image copied to clipboard.");
+  } catch (error) {
+    showLauncherError(error);
+  }
+  queryEl.focus();
+}
+
 /* Commands are shared by search and settings; keep this helper next to them. */
 async function refresh() {
   if (IS_SETTINGS_WINDOW || settingsOpen) return;
@@ -1772,7 +1863,15 @@ async function refresh() {
   showLauncherError();
 
   try {
-    if (mode === "emoji") {
+    if (mode === "qr") {
+      qrReadyText = "";
+      if (q) {
+        const modules = await invoke("qr_generate", { text: queryEl.value });
+        if (seq !== refreshSeq) return;
+        renderQr(modules);
+        qrReadyText = queryEl.value;
+      }
+    } else if (mode === "emoji") {
       const needle = q.toLowerCase();
       const pool = ALL_EMOJI.filter(
         (e) => !needle || e.name.toLowerCase().includes(needle) || e.keywords.toLowerCase().includes(needle)
@@ -1877,20 +1976,19 @@ async function refresh() {
 async function activate(i) {
   const item = items[i];
   if (!item) return;
+  const external = ["web", "file", "app"].includes(item.kind);
+  if (external && activating) return;
+  if (external) activating = true;
   if (item.kind === "calc") {
-    const value = item.value;
-    await navigator.clipboard?.writeText(value).catch(() => invoke("copy_to_clipboard", { text: value }));
-    hideWindow();
+    if (await copyText(item.value)) hideWindow();
   } else if (item.kind === "lorem") {
-    const text = item.text;
-    const copied = await navigator.clipboard?.writeText(text).then(() => true).catch(() => false);
-    if (!copied) invoke("copy_to_clipboard", { text }).catch(() => {});
-    hideWindow();
+    if (await copyText(item.text)) hideWindow();
   } else if (item.kind === "web") {
     try {
       await invoke("web_search", { query: item.query, engineId: item.engine });
       hideWindow();
     } catch (error) {
+      activating = false;
       showLauncherError(error);
     }
   } else if (item.kind === "cmd") {
@@ -1899,23 +1997,33 @@ async function activate(i) {
       return;
     }
     mode = item.cmd;
+    qrReadyText = "";
     queryEl.value = "";
     queryEl.placeholder = MODE_LABEL[mode];
     refresh();
   } else if (item.kind === "clip") {
-    // Salin + tempel ke jendela aktif sebelumnya (ala Raycast)
-    await invoke("paste_to_active_window", { text: item.text });
+    // Copy, then paste into the window that had focus before Sunny opened.
+    try {
+      await invoke("paste_to_active_window", { text: item.text });
+    } catch (error) {
+      showLauncherError(`Could not paste: ${error}`);
+    }
   } else if (item.kind === "emoji") {
-    await navigator.clipboard?.writeText(item.emoji).catch(() => invoke("copy_to_clipboard", { text: item.emoji }));
-    hideWindow();
+    if (await copyText(item.emoji)) hideWindow();
   } else if (item.kind === "file") {
-    invoke("open_path", { path: item.path }).catch(() => {});
-    hideWindow();
+    try {
+      await invoke("open_path", { path: item.path });
+      hideWindow();
+    } catch (error) {
+      activating = false;
+      showLauncherError(error);
+    }
   } else {
     try {
       await invoke("run_app", { path: item.path });
       hideWindow();
     } catch (error) {
+      activating = false;
       showLauncherError(error);
     }
   }
@@ -1924,6 +2032,8 @@ async function activate(i) {
 /* ── Fokus otomatis ────────────────────────────────────── */
 function resetLauncherSearch() {
   if (IS_SETTINGS_WINDOW || settingsOpen) return;
+  activating = false;
+  qrReadyText = "";
   // Invalidate in-flight requests before clearing anything, so they cannot restore
   // the previous query's results after the launcher has reopened.
   refreshSeq++;
@@ -1970,6 +2080,10 @@ listen("sunny:apps-updated", async () => {
 listen("sunny:clip-updated", () => {
   if (mode === "clip") refresh();
 });
+listen("sunny:launcher-warning", (e) => {
+  if (IS_SETTINGS_WINDOW) return;
+  showLauncherError(e.payload);
+});
 listen("sunny:files-updated", () => {
   if (mode === "files" || (mode === "apps" && SETTINGS.include_files && queryEl.value.trim())) refresh();
 });
@@ -1996,13 +2110,16 @@ queryEl.addEventListener("input", () => {
   clearTimeout(searchTimer);
   closeActions(false);
   items = [];
+  qrReadyText = "";
   selected = 0;
   render();
   const q = queryEl.value.trim();
-  if (mode === "emoji" || !q || q.startsWith("?") || q.endsWith("?")) refresh();
+  if (mode === "qr" && q) searchTimer = setTimeout(refresh, 80);
+  else if (mode === "emoji" || !q || q.startsWith("?") || q.endsWith("?")) refresh();
   else searchTimer = setTimeout(refresh, 40);
 });
 modeBackEl?.addEventListener("click", backToApps);
+qrCopyEl?.addEventListener("click", copyQr);
 actionsBtnEl?.addEventListener("click", toggleActions);
 document.addEventListener("pointerdown", (e) => {
   if (actionsOpen && !actionsEl.contains(e.target) && !actionsBtnEl.contains(e.target) && !hintsEl.contains(e.target)) {
@@ -2020,7 +2137,7 @@ pauseBtnEl.addEventListener("click", () => {
   invoke("clip_toggle_pause").then((v) => {
     paused = v;
     render();
-  });
+  }).catch(showLauncherError);
 });
 
 window.addEventListener("keydown", (e) => {
@@ -2049,7 +2166,7 @@ window.addEventListener("keydown", (e) => {
       focusAction(e.key === "Home" ? 0 : actionsEl.querySelectorAll("button").length - 1);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      actionsEl.querySelectorAll("button")[actionSelected]?.click();
+      if (!e.repeat) actionsEl.querySelectorAll("button")[actionSelected]?.click();
     } else if (e.key === "Escape" || e.key === "Tab" || (e.ctrlKey && e.key.toLowerCase() === "k")) {
       e.preventDefault();
       closeActions();
@@ -2080,12 +2197,12 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown" || vimDown) {
     e.preventDefault();
     selected = Math.min(selected + 1, max);
-    render();
+    syncSelectionDom();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "ArrowUp" || vimUp) {
     e.preventDefault();
     selected = Math.max(selected - 1, 0);
-    render();
+    syncSelectionDom();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (
     e.key === "Backspace" &&
@@ -2100,14 +2217,14 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     const item = items[selected];
     if (item?.kind === "clip") {
-      invoke("clip_delete", { id: item.id }).then(refresh);
+      invoke("clip_delete", { id: item.id }).then(refresh).catch(showLauncherError);
     }
   } else if (mode === "clip" && e.ctrlKey && e.key.toLowerCase() === "b") {
     // "Actions": salin entri tanpa paste (aksi alternatif)
     e.preventDefault();
     const item = items[selected];
     if (item?.kind === "clip") {
-      invoke("copy_to_clipboard", { text: item.text }).then(hideWindow);
+      copyText(item.text).then((ok) => { if (ok) hideWindow(); });
     }
   } else if (items[selected]?.kind === "file" && e.ctrlKey && !e.altKey && !e.metaKey && e.shiftKey && e.key.toLowerCase() === "c") {
     e.preventDefault();
@@ -2118,7 +2235,10 @@ window.addEventListener("keydown", (e) => {
     revealFilePath(items[selected]);
   } else if (e.key === "Enter") {
     e.preventDefault();
-    activate(selected);
+    if (!e.repeat) {
+      if (mode === "qr") copyQr();
+      else activate(selected);
+    }
   } else if (e.key === "Escape") {
     e.preventDefault();
     if (IS_SETTINGS_WINDOW) {

@@ -38,6 +38,8 @@ class Element {
   get innerHTML() { return this.markup || ""; }
   append(...children) { children.forEach((node) => { node.parentNode = this; this.children.push(node); }); }
   appendChild(node) { this.append(node); return node; }
+  insertBefore(node, before) { node.parentNode = this; this.children.splice(this.children.indexOf(before), 0, node); }
+  remove() { if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(key, value) { this.attributes[key] = String(value); if (key === "id") this.id = value; }
   getAttribute(key) { return this.attributes[key] ?? null; }
@@ -55,6 +57,9 @@ class Element {
   focus() { this.focused = true; }
   blur() { this.focused = false; }
   scrollIntoView() {}
+  getContext() {
+    return { fillStyle: "", fillRect() {} };
+  }
   click() {
     const event = { target: this, preventDefault() {}, stopPropagation() {} };
     for (const callback of this.listeners.click || []) callback(event);
@@ -290,6 +295,208 @@ test("rows without file or app actions never open the actions menu", async () =>
   await f.settle();
   await f.key("K", { ctrlKey: true, shiftKey: true });
   assert.equal(f.nodes.actions.hidden, true);
+});
+
+test("a repeated activation cannot open the browser twice", async () => {
+  const f = await fixture();
+  let release;
+  f.handlers.web_search = () => new Promise((resolve) => { release = () => resolve("https://example.com"); });
+  await f.search("Siapa itu jokowi?");
+  assert.equal(f.run("items[0].kind"), "web");
+  f.calls.length = 0;
+
+  // Enter held down, or a second click, while the first launch is still in flight.
+  const first = f.run("activate(0)");
+  const second = f.run("activate(0)");
+  await f.settle();
+  release();
+  await Promise.all([first, second]);
+
+  assert.equal(f.calls.filter((call) => call.command === "web_search").length, 1);
+});
+
+test("holding Enter does not launch the same row repeatedly", async () => {
+  const f = await fixture();
+  f.handlers.open_path = () => new Promise(() => {});
+  f.handlers.search_apps = [];
+  f.handlers.search_files = { ready: true, total: 1, items: [{ item: { name: "Notes.txt", path: "C:\\Temp\\Notes.txt" } }] };
+  await f.search("notes");
+  f.calls.length = 0;
+
+  // Auto-repeat sends several Enter events with repeat set.
+  for (let i = 0; i < 3; i++) await f.key("Enter", { repeat: true });
+  await f.key("Enter");
+
+  assert.equal(f.calls.filter((call) => call.command === "open_path").length, 1);
+});
+
+test("a failed web launch is visible and may be retried", async () => {
+  const f = await fixture();
+  let attempts = 0;
+  f.handlers.web_search = () => { if (++attempts === 1) throw new Error("No browser"); };
+  await f.search("find this?");
+  await f.run("activate(0)");
+  assert.match(f.nodes.launcherStatus.textContent, /No browser/);
+  await f.run("activate(0)");
+  assert.equal(attempts, 2);
+});
+
+test("a successful web launch stays guarded until the launcher is shown again", async () => {
+  const f = await fixture();
+  await f.search("first search?");
+  await f.run("activate(0)");
+  await f.run("activate(0)");
+  assert.equal(f.calls.filter((call) => call.command === "web_search").length, 1);
+  f.events["sunny:shown"]();
+  await f.settle();
+  await f.search("next search?");
+  await f.run("activate(0)");
+  assert.equal(f.calls.filter((call) => call.command === "web_search").length, 2);
+});
+
+test("a failed file open keeps the launcher visible and permits another attempt", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [],
+    search_files: { ready: true, total: 1, items: [{ item: { name: "note", path: "C:\\note.txt" } }] },
+    open_path: () => { throw new Error("No handler"); },
+  } });
+  await f.search("note");
+  const index = f.run('items.findIndex((item) => item.kind === "file")');
+  assert.ok(index >= 0);
+  await f.run(`activate(${index})`);
+  assert.match(f.nodes.launcherStatus.textContent, /No handler/);
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+  await f.run(`activate(${index})`);
+  assert.equal(f.calls.filter((call) => call.command === "open_path").length, 2);
+});
+
+test("QR command opens an offline text-to-image view with an accessible preview", async () => {
+  const f = await fixture({ responses: { qr_generate: [[false, true], [true, false]] } });
+  await f.search("qr code");
+  const index = f.run('items.findIndex((item) => item.cmd === "qr")');
+  assert.ok(index >= 0);
+  await f.run(`activate(${index})`);
+  assert.equal(f.run("mode"), "qr");
+  assert.match(f.nodes.query.placeholder, /QR/);
+  await f.search("https://example.com/?q=hi&x=2");
+  assert.equal(f.calls.filter((call) => call.command === "qr_generate").at(-1).args.text,
+    "https://example.com/?q=hi&x=2");
+  assert.equal(f.nodes.qrPreview.hidden, false);
+  assert.equal(f.nodes.qrPreview.querySelectorAll("canvas").length, 1);
+  assert.equal(f.calls.some((call) => call.command === "web_search"), false);
+  await f.key("Enter");
+  assert.equal(f.calls.filter((call) => call.command === "qr_copy").at(-1).args.text,
+    "https://example.com/?q=hi&x=2");
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+  await f.key("Escape");
+  assert.equal(f.run("mode"), "apps");
+});
+
+test("ordinary file queries do not surface the QR command", async () => {
+  const f = await fixture();
+  await f.search("note");
+  assert.equal(f.run('items.some((item) => item.cmd === "qr")'), false);
+});
+
+test("typing QR content coalesces generation until the latest input settles", async () => {
+  const f = await fixture({ responses: { qr_generate: [[true]] } });
+  await f.search("qr code");
+  await f.run('activate(items.findIndex((item) => item.cmd === "qr"))');
+  f.nodes.query.value = "old";
+  f.nodes.query.listeners.input[0]();
+  f.nodes.query.value = "latest";
+  f.nodes.query.listeners.input[0]();
+  await f.runTimers(80);
+  assert.deepEqual(f.calls.filter((call) => call.command === "qr_generate").map((call) => call.args.text),
+    ["latest"]);
+});
+
+test("QR rejects empty input, reports generation and copy errors, and ignores stale previews", async () => {
+  const f = await fixture({ responses: { qr_generate: [[true]] } });
+  await f.search("qr code");
+  await f.run('activate(items.findIndex((item) => item.cmd === "qr"))');
+  await f.search("   ");
+  assert.equal(f.nodes.qrPreview.hidden, true);
+  assert.equal(f.calls.some((call) => call.command === "qr_generate"), false);
+
+  let release;
+  f.handlers.qr_generate = ({ text }) => text === "old" ? new Promise((resolve) => { release = resolve; }) : [[true]];
+  f.nodes.query.value = "old";
+  const pending = f.run("refresh()");
+  await f.search("new");
+  release([[false, false]]);
+  await pending;
+  await f.settle();
+  assert.equal(f.nodes.qrPreview.querySelectorAll("canvas")[0].dataset.size, "1");
+  f.handlers.qr_copy = () => { throw new Error("Clipboard busy"); };
+  await f.key("Enter");
+  assert.match(f.nodes.launcherStatus.textContent, /Clipboard busy/);
+  f.handlers.qr_generate = () => { throw new Error("Too long"); };
+  await f.search("another");
+  assert.equal(f.nodes.qrPreview.hidden, true);
+  assert.match(f.nodes.launcherStatus.textContent, /Too long/);
+});
+
+test("a failed hide does not block later launches", async () => {
+  const f = await fixture({ responses: {
+    hide_main_window: () => { throw new Error("Window busy"); },
+    web_search: () => "https://example.com",
+  } });
+  await f.search("first search?");
+  await f.run("activate(0)");
+  assert.match(f.nodes.launcherStatus.textContent, /Window busy/);
+  await f.run("activate(0)");
+  assert.equal(f.calls.filter((call) => call.command === "web_search").length, 2);
+});
+
+test("a copy that fails everywhere is reported instead of losing the text", async () => {
+  const f = await fixture({ responses: {
+    calc: "42",
+    copy_to_clipboard: () => { throw new Error("Clipboard busy"); },
+  } });
+  f.context.navigator.clipboard.writeText = async () => { throw new Error("denied"); };
+  await f.search("6*7");
+  assert.equal(f.run("items[0].kind"), "calc");
+  await f.run("activate(0)");
+  assert.match(f.nodes.launcherStatus.textContent, /Clipboard busy/);
+  assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+});
+
+test("arrow keys move the highlight without rebuilding result rows", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [{ item: { name: "One", path: "one.lnk" } }, { item: { name: "Two", path: "two.lnk" } }],
+  } });
+  await f.search("o");
+  const first = f.nodes.list.querySelectorAll(".item")[0];
+  await f.key("ArrowDown");
+  const rows = f.nodes.list.querySelectorAll(".item");
+  assert.equal(rows[0], first);
+  assert.equal(rows[1].classList.contains("selected"), true);
+  assert.equal(f.run("selected"), 1);
+});
+
+test("animated browser launches keep the guard until the launcher is shown", async () => {
+  const f = await fixture();
+  await f.search("guarded?");
+  await f.run("activate(0)");
+  await f.run("activate(0)");
+  assert.equal(f.calls.filter((call) => call.command === "web_search").length, 1);
+});
+
+test("backend warnings reach the launcher status line", async () => {
+  const f = await fixture();
+  f.events["sunny:launcher-warning"]({ payload: "Index unavailable" });
+  assert.match(f.nodes.launcherStatus.textContent, /Index unavailable/);
+});
+
+test("clipboard footer names the real copy and delete shortcuts", async () => {
+  const f = await fixture({ responses: { clip_history: [] } });
+  await f.search("clipboard");
+  const index = f.run('items.findIndex((item) => item.cmd === "clip")');
+  await f.run(`activate(${index})`);
+  await f.settle();
+  assert.match(f.nodes.hints.innerHTML, /Ctrl<\/kbd><kbd>B<\/kbd> Copy/);
+  assert.match(f.nodes.hints.innerHTML, /Ctrl<\/kbd><kbd>D<\/kbd> Delete/);
 });
 
 test("snapshot events are window-specific, tint changes immediately, and settings opacity has no floor", async () => {

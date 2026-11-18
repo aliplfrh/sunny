@@ -28,15 +28,24 @@ impl SearchEngine {
         if !self.suffix.trim().is_empty() {
             full.push_str(self.suffix.trim_end());
         }
-        self.template.replace("{query}", &urlencoding::encode(&full))
+        self.template
+            .replace("{query}", &urlencoding::encode(&full))
     }
 }
 
 /// Engines offered out of the box, in the order they should be offered.
 pub fn default_engines() -> Vec<SearchEngine> {
     vec![
-        engine("google", "Google", "https://www.google.com/search?q={query}"),
-        engine("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/?q={query}"),
+        engine(
+            "google",
+            "Google",
+            "https://www.google.com/search?q={query}",
+        ),
+        engine(
+            "duckduckgo",
+            "DuckDuckGo",
+            "https://duckduckgo.com/?q={query}",
+        ),
         engine("bing", "Bing", "https://www.bing.com/search?q={query}"),
         engine(
             "youtube",
@@ -77,7 +86,11 @@ pub fn engine_by_id(id: &str) -> SearchEngine {
         .into_iter()
         .find(|engine| engine.id.eq_ignore_ascii_case(id))
         .unwrap_or_else(|| {
-            engine("google", "Google", "https://www.google.com/search?q={query}")
+            engine(
+                "google",
+                "Google",
+                "https://www.google.com/search?q={query}",
+            )
         })
 }
 
@@ -122,8 +135,14 @@ mod tests {
 
     #[test]
     fn question_mark_works_at_either_end() {
-        assert_eq!(split_query("rust ownership?"), ("rust ownership".into(), true));
-        assert_eq!(split_query("?rust ownership"), ("rust ownership".into(), true));
+        assert_eq!(
+            split_query("rust ownership?"),
+            ("rust ownership".into(), true)
+        );
+        assert_eq!(
+            split_query("?rust ownership"),
+            ("rust ownership".into(), true)
+        );
         assert_eq!(split_query("  rust??  "), ("rust".into(), true));
         assert_eq!(split_query("rust"), ("rust".into(), false));
     }
@@ -132,7 +151,10 @@ mod tests {
     fn spaces_and_symbols_are_percent_encoded() {
         let google = engine_by_id("google");
         let (_, url) = prepare("c++ & rust #1?", &google).unwrap();
-        assert_eq!(url, "https://www.google.com/search?q=c%2B%2B%20%26%20rust%20%231");
+        assert_eq!(
+            url,
+            "https://www.google.com/search?q=c%2B%2B%20%26%20rust%20%231"
+        );
         // No raw separator can leak into the query string.
         assert!(!url.split("q=").nth(1).unwrap().contains('&'));
     }
@@ -150,7 +172,10 @@ mod tests {
         assert_eq!(prepare("?", &google), Err(NotASearch::EmptyQuery));
         assert_eq!(prepare("?  ", &google), Err(NotASearch::EmptyQuery));
         assert_eq!(prepare("?a", &google), Err(NotASearch::TooShort));
-        assert_eq!(prepare("rust", &google), Err(NotASearch::MissingQuestionMark));
+        assert_eq!(
+            prepare("rust", &google),
+            Err(NotASearch::MissingQuestionMark)
+        );
     }
 
     #[test]

@@ -24,7 +24,6 @@ pub fn flush_desktop_compositor() {}
 
 #[cfg(windows)]
 mod windows_imp {
-    use std::io::Write;
     use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
         DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
@@ -204,7 +203,6 @@ mod windows_imp {
                 return None;
             }
         }
-        let _ = std::io::sink().write_all(&[]); // diam: png sudah di-buffer out
         Some(out)
     }
 
@@ -583,6 +581,27 @@ pub fn shell_open(path: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// Copy an RGBA image through the platform clipboard (pixels are owned by the caller).
+#[cfg(windows)]
+pub fn clipboard_set_image(width: usize, height: usize, pixels: Vec<u8>) -> Result<(), String> {
+    use std::borrow::Cow;
+
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width,
+            height,
+            bytes: Cow::Owned(pixels),
+        })
+        .map_err(|e| format!("Could not copy QR image: {e}"))
+}
+
+#[cfg(not(windows))]
+pub fn clipboard_set_image(_width: usize, _height: usize, _pixels: Vec<u8>) -> Result<(), String> {
+    Err("Image clipboard is available on Windows only.".to_string())
 }
 
 /// Nomor urut global clipboard Windows — naik setiap isi clipboard berubah.
