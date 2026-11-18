@@ -230,7 +230,19 @@ async fn background<T: Send + 'static>(
     std::thread::Builder::new()
         .name("sunny-command".into())
         .spawn(move || {
-            let _ = send.blocking_send(work());
+            // A panic would otherwise drop the sender and leave the UI waiting
+            // forever without an answer, so turn it into a visible error.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+                .unwrap_or_else(|panic| {
+                    let detail = panic
+                        .downcast_ref::<&str>()
+                        .map(|text| (*text).to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_default();
+                    eprintln!("Sunny background task panicked: {detail}");
+                    Err("The task failed unexpectedly. Nothing was changed.".to_string())
+                });
+            let _ = send.blocking_send(result);
         })
         .map_err(|e| format!("Cannot start background task: {e}"))?;
     receive
@@ -443,26 +455,35 @@ fn emit_omniget_setup(app: &tauri::AppHandle, message: &'static str, percent: Op
     );
 }
 
-/// Explicit Settings action: fetch only the pinned official CLI, verify its hash,
-/// and atomically install it. No installer, shell, or downloaded program is run.
-#[tauri::command]
-async fn video_setup(app: tauri::AppHandle) -> Result<OmnigetInstallation, String> {
-    use sun_core::omniget_setup::{MAX_PACKAGE_BYTES, PACKAGE_URL};
-    if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        return Err("OmniGet setup is available for Windows x64 only.".into());
+/// `reqwest` is built without a bundled TLS provider, and the updater only
+/// installs one when its own network call runs first. Without this, HTTPS from
+/// any other command panics before connecting.
+fn ensure_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
     }
-    let state = app.state::<OmnigetSetupState>();
-    // The mutex is held only inside reserve, never across these network awaits.
-    let _guard = state.reserve(&app.state::<sun_core::video::Downloads>())?;
-    let target = sun_platform::omniget::managed_cli_path()
-        .filter(|p| p.is_absolute() && !p.to_string_lossy().starts_with(r"\\"))
-        .ok_or("The local Sunny tools folder is unavailable.")?;
-    emit_omniget_setup(&app, "Downloading official OmniGet CLI (~25 MB)…", Some(0));
-    let client = reqwest::Client::builder()
+}
+
+fn download_failure(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        "OmniGet download timed out before it finished. Nothing was installed; check your connection and try again.".into()
+    } else if error.is_connect() {
+        "Could not connect to the official OmniGet download server. Check your connection and try again.".into()
+    } else {
+        "The OmniGet download failed before it finished. Nothing was installed; try again.".into()
+    }
+}
+
+/// Blocking on purpose: a hard deadline and an unwind boundary keep this thread
+/// from ever leaving a caller without an answer.
+fn fetch_package(progress: &dyn Fn(Option<u8>)) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    use sun_core::omniget_setup::{MAX_PACKAGE_BYTES, PACKAGE_URL};
+    ensure_tls_provider();
+    let client = reqwest::blocking::Client::builder()
         .https_only(true)
         .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_secs(120))
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() >= 3
                 || !sun_core::omniget_setup::allowed_package_url(attempt.url())
@@ -475,42 +496,95 @@ async fn video_setup(app: tauri::AppHandle) -> Result<OmnigetInstallation, Strin
         .user_agent(concat!("Sunny/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|_| "Could not initialize the secure downloader.")?;
-    let mut response = client.get(PACKAGE_URL).send().await
-        .map_err(|_| "Could not reach the official OmniGet download server. Check your connection and try again.")?
-        .error_for_status().map_err(|_| "The official OmniGet CLI package is currently unavailable. Try again later.")?;
+    let mut response = client
+        .get(PACKAGE_URL)
+        .send()
+        .map_err(|error| download_failure(&error))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "The official OmniGet CLI package is currently unavailable (HTTP {}).",
+            response.status().as_u16()
+        ));
+    }
     let total = response.content_length();
-    if total.map(|n| n > MAX_PACKAGE_BYTES as u64).unwrap_or(false) {
+    if total
+        .map(|size| size > MAX_PACKAGE_BYTES as u64)
+        .unwrap_or(false)
+    {
         return Err(
             "The OmniGet package exceeds the safe size limit. Nothing was installed.".into(),
         );
     }
     let mut bytes = Vec::new();
-    let mut last_percent = Some(0);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut last_percent = Some(0u8);
     let mut reported_at = 0;
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
-        "OmniGet download stalled or was interrupted. Nothing was installed; try again."
-    })? {
-        if chunk.len() > MAX_PACKAGE_BYTES.saturating_sub(bytes.len()) {
+    loop {
+        let read = response.read(&mut buffer).map_err(|error| {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) {
+                "OmniGet download timed out before it finished. Nothing was installed; check your connection and try again."
+            } else {
+                "OmniGet download stalled or was interrupted. Nothing was installed; try again."
+            }
+        })?;
+        if read == 0 {
+            break;
+        }
+        if read > MAX_PACKAGE_BYTES.saturating_sub(bytes.len()) {
             return Err(
                 "The OmniGet package exceeds the safe size limit. Nothing was installed.".into(),
             );
         }
-        bytes.extend_from_slice(&chunk);
+        bytes.extend_from_slice(&buffer[..read]);
         let percent = total
-            .filter(|n| *n > 0)
-            .map(|n| ((bytes.len() as u64 * 100 / n).min(100)) as u8);
+            .filter(|size| *size > 0)
+            .map(|size| ((bytes.len() as u64 * 100 / size).min(100)) as u8);
         if percent != last_percent || bytes.len() - reported_at >= 1024 * 1024 {
-            emit_omniget_setup(&app, "Downloading official OmniGet CLI…", percent);
+            progress(percent);
             last_percent = percent;
             reported_at = bytes.len();
         }
     }
-    emit_omniget_setup(&app, "Verifying SHA-256 and extracting CLI…", None);
-    let result = background(move || {
-        sun_core::omniget_setup::install_cli_package(&bytes, &target)?;
-        Ok(omniget_installation(&target.to_string_lossy()))
-    })
-    .await?;
+    if bytes.is_empty() {
+        return Err(
+            "The official OmniGet download returned no data. Nothing was installed.".into(),
+        );
+    }
+    Ok(bytes)
+}
+
+fn install_cli_package(
+    app: &tauri::AppHandle,
+    target: &std::path::Path,
+) -> Result<OmnigetInstallation, String> {
+    let bytes = fetch_package(&|percent| {
+        emit_omniget_setup(app, "Downloading official OmniGet CLI…", percent)
+    })?;
+    emit_omniget_setup(app, "Verifying SHA-256 and extracting CLI…", None);
+    sun_core::omniget_setup::install_cli_package(&bytes, target)?;
+    Ok(omniget_installation(&target.to_string_lossy()))
+}
+
+/// Explicit Settings action: fetch only the pinned official CLI, verify its hash,
+/// and atomically install it. No installer, shell, or downloaded program is run.
+#[tauri::command]
+async fn video_setup(app: tauri::AppHandle) -> Result<OmnigetInstallation, String> {
+    if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Err("OmniGet setup is available for Windows x64 only.".into());
+    }
+    let state = app.state::<OmnigetSetupState>();
+    let guard = state.reserve(&app.state::<sun_core::video::Downloads>())?;
+    let target = sun_platform::omniget::managed_cli_path()
+        .filter(|p| p.is_absolute() && !p.to_string_lossy().starts_with(r"\\"))
+        .ok_or("The local Sunny tools folder is unavailable.")?;
+    emit_omniget_setup(&app, "Downloading official OmniGet CLI (~25 MB)…", Some(0));
+    let handle = app.clone();
+    let result = background(move || install_cli_package(&handle, &target)).await;
+    drop(guard);
+    let result = result?;
     emit_omniget_setup(
         &app,
         "OmniGet CLI installed. Additional engines are prepared on first use.",
@@ -1152,6 +1226,9 @@ fn main() {
             use tauri::menu::MenuBuilder;
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
+            // HTTPS commands need a process-wide TLS provider (see ensure_tls_provider).
+            ensure_tls_provider();
+
             // ── Setelan aktif (sudah dimuat sebelum window dibuat) ──
             let active = app.state::<SettingsState>().0.lock().unwrap().clone();
 
@@ -1356,6 +1433,29 @@ fn main() {
 #[cfg(test)]
 mod command_tests {
     use super::*;
+
+    #[test]
+    fn tls_provider_is_installed_before_https_commands_run() {
+        ensure_tls_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
+
+    #[test]
+    fn panicking_background_task_answers_with_an_error_instead_of_hanging() {
+        let result = tauri::async_runtime::block_on(background::<()>(|| panic!("fixture panic")));
+        assert!(result.unwrap_err().contains("unexpectedly"));
+    }
+
+    #[test]
+    #[ignore = "network: downloads the pinned official OmniGet package"]
+    fn live_package_downloads_verifies_and_installs() {
+        let bytes = fetch_package(&|_| {}).expect("official OmniGet package downloads");
+        let dir = std::env::temp_dir().join(format!("sunny-live-setup-{}", std::process::id()));
+        let target = dir.join("omniget-cli.exe");
+        sun_core::omniget_setup::install_cli_package(&bytes, &target).expect("verified install");
+        assert!(target.is_file());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn setup_and_video_download_are_mutually_exclusive_and_release_their_reservations() {

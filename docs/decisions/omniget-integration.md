@@ -38,9 +38,14 @@ Settings download/setup option and pushing the integration to GitHub.
   CLI limit, traversal/symlink/duplicate protection, and atomic replacement apply.
   Failed verification/replacement preserves an existing CLI. The saved path uses
   the normal Settings transaction/broadcast, not a separate configuration file.
-- Connection and read stalls time out after 10 seconds, the transfer has a 180-second
-  total deadline, and there is no application retry loop. Setup is single-flight
-  and refuses to replace the CLI during an active media download.
+- Connection stalls time out after 10 seconds, the transfer has a 120-second total
+  deadline, and there is no application retry loop. Setup is single-flight and
+  refuses to replace the CLI during an active media download.
+- The download runs on a worker thread, never on the UI thread, and a panicking
+  command replies with an error instead of leaving the frontend waiting. The UI also
+  unlocks the control if no response arrives. v1.1.0 shipped without this and hung
+  at "Please wait…" because `reqwest` had no `rustls` provider installed; the provider
+  is now installed at startup and before each download.
 - **Check requirements** only checks local file presence in common locations; it
   does not execute programs or contact the network, and may not see custom OmniGet
   overrides. Missing yt-dlp, FFmpeg/FFprobe and a JS runtime are reported separately

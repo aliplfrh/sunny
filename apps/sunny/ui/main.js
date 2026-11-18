@@ -1303,20 +1303,38 @@ async function checkOmnigetRequirements() {
   finally { omnigetSetupBusy = false; updateOmnigetSetupControl(); }
 }
 
+const OMNIGET_SETUP_TIMEOUT_MS = 180000;
+
 async function downloadOmnigetCli() {
   if (omnigetSetupBusy) return;
   omnigetSetupBusy = true;
   omnigetSetupPercent = 0;
   omnigetSetupMessage = "Downloading and verifying the official OmniGet CLI. No installer will be run…";
   updateOmnigetSetupControl();
+  // The backend has its own deadline; this only covers a lost event/response so
+  // the button can never stay locked on "Please wait…".
+  let watchdog = 0;
+  const timeout = new Promise((resolve) => {
+    watchdog = setTimeout(() => resolve("timeout"), OMNIGET_SETUP_TIMEOUT_MS);
+  });
   try {
-    const installation = await invoke("video_setup");
+    const outcome = await Promise.race([invoke("video_setup"), timeout]);
+    if (outcome === "timeout") {
+      omnigetSetupMessage = "OmniGet setup stopped responding. Nothing was installed - try again.";
+      return;
+    }
+    const installation = outcome;
     if (!installation?.available || typeof installation.path !== "string" || !installation.path) throw new Error("The downloaded CLI could not be detected.");
     const error = await onSettingChange({ omniget_cli_path: installation.path }, true);
     if (error) throw new Error(`CLI downloaded, but its path could not be saved: ${error}`);
     omnigetSetupMessage = `OmniGet CLI installed. ${omnigetRequirementSummary(installation)}`;
   } catch (error) { omnigetSetupMessage = String(error); }
-  finally { omnigetSetupBusy = false; omnigetSetupPercent = null; updateOmnigetSetupControl(); }
+  finally {
+    clearTimeout(watchdog);
+    omnigetSetupBusy = false;
+    omnigetSetupPercent = null;
+    updateOmnigetSetupControl();
+  }
 }
 
 listen("sunny:omniget-setup", (e) => {

@@ -1098,6 +1098,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -3018,6 +3019,7 @@ checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -3631,7 +3633,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sun-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "base64 0.23.1",
  "dirs 6.0.0",
@@ -3649,7 +3651,7 @@ dependencies = [
 
 [[package]]
 name = "sun-platform"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "arboard",
  "png",
@@ -3659,11 +3661,12 @@ dependencies = [
 
 [[package]]
 name = "sunny"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "arboard",
  "base64 0.23.1",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sun-core",

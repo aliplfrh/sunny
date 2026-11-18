@@ -2,6 +2,21 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Release v1.1.1 — OmniGet setup could hang
+
+- [x] **Fixed:** Download OmniGet CLI stopped at "Please wait…" forever. The HTTPS
+      client ran before any `rustls` provider was installed (only the updater installs
+      one), which panicked the command before connecting, so Tauri never answered the
+      call. The provider is now installed at startup and the download runs on its own
+      thread with a 120-second deadline.
+- [x] A panicking background command now returns an error instead of a lost reply, and
+      the setup control unlocks itself if a response never arrives.
+- [x] Live verification of the real path: 26.4 MB official package, SHA-256 match,
+      extraction and install in 19.6 s (`cargo test -p sunny --offline live_package --
+      --ignored`).
+- [ ] First real video download through the installed CLI, including its one-time
+      yt-dlp/FFmpeg/JS-runtime provisioning.
+
 ## Release v1.1.0 — OmniGet video download
 
 - [x] Search-only Video Download command opens inside the launcher, not a browser tab.
@@ -12,9 +27,10 @@ Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GP
       Additional engines are prepared by OmniGet when first needed, not silently at startup.
 - [x] Keep one download alive while returning to search or hiding Sunny; restore its
       state on re-entry. No hotkey changes, remote UI, MCP runtime, or automatic install.
-- [ ] End-to-end managed CLI setup and media download. The official asset HEAD request
-      timed out after 10 seconds on the development machine; no retry loop or live
-      installation was attempted. Local tests use isolated archives/child processes.
+- [x] Managed CLI setup verified live in v1.1.1: 26.4 MB official package, SHA-256
+      match, extraction and install in 19.6 s.
+- [ ] First real media download through the installed CLI, including OmniGet's one-time
+      yt-dlp/FFmpeg/JS-runtime provisioning.
 
 ## Release v1.0.9 — Browser activation and QR codes
 

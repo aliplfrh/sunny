@@ -179,6 +179,24 @@ test("failed setup does not change preferences and can be retried", async () => 
   assert.equal(f.calls.filter((c) => c.command === "video_setup").length, 2);
 });
 
+test("a lost setup response unlocks the button instead of hanging forever", async () => {
+  const f = await fixture({ settingsWindow: true, responses: {
+    video_setup: () => new Promise(() => {}),
+  } });
+  const button = f.nodes.settingsBody.querySelectorAll("button").find((b) => b.textContent === "Download OmniGet CLI");
+  assert.ok(button);
+  const pending = button.click();
+  await f.settle();
+  assert.equal(f.run("omnigetSetupBusy"), true);
+  await f.runTimers(180000);
+  assert.equal(f.run("omnigetSetupBusy"), false);
+  assert.match(f.run("omnigetSetupMessage"), /stopped responding/);
+  await pending;
+  assert.equal(f.calls.some((c) => c.command === "settings_update"), false);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Download OmniGet CLI");
+});
+
 test("requirements check distinguishes a found CLI from missing video engines without downloading", async () => {
   const f = await fixture({ settingsWindow: true, responses: {
     video_check: { available: true, path: "C:\\OmniGet\\omniget-cli.exe", missing_tools: ["FFmpeg", "FFprobe"] },

@@ -18,6 +18,7 @@ serde.workspace = true
 serde_json.workspace = true
 arboard = "3"
 base64 = "0.23"
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "blocking"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sun-core = { path = "../../../crates/sun-core" }
 sun-platform = { path = "../../../crates/sun-platform" }
