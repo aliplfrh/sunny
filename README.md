@@ -73,7 +73,7 @@ all in the same list, ranked by relevance. No modes to remember, no prefixes to 
   Press <kbd>Enter</kbd> (or choose **Copy QR Image**) to copy a scannable image locally;
   input is never sent to a QR service (maximum 512 UTF-8 bytes)
 
-### ↓ Video Download (unreleased)
+### ↓ Video Download
 
 Search **Video Download**, open it, paste an HTTP(S) video URL into Sunny's search
 field, choose a quality (or **Audio only**), then press <kbd>Enter</kbd> or **Download**.

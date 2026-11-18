@@ -2,7 +2,7 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
-## Unreleased — OmniGet Video Download
+## Release v1.1.0 — OmniGet video download
 
 - [x] Search-only Video Download command opens inside the launcher, not a browser tab.
 - [x] Separate OmniGet CLI discovery / configurable local path, quality and audio-only
