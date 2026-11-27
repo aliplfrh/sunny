@@ -149,27 +149,46 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
-    fn target(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir()
-            .join(format!("sunny-setup-{name}-{}", std::process::id()))
-            .join("omniget-cli.exe")
+    /// Temp folder that removes itself, so a failed assertion leaves nothing behind.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("sunny-setup-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn target(&self) -> std::path::PathBuf {
+            self.0.join("omniget-cli.exe")
+        }
+
+        fn entries(&self) -> usize {
+            std::fs::read_dir(&self.0).unwrap().count()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
     fn bad_digest_writes_nothing_and_keeps_existing_cli() {
-        let path = target("digest");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let scratch = Scratch::new("digest");
+        let path = scratch.target();
         std::fs::write(&path, b"previous").unwrap();
         let bytes = archive(&[("omniget-cli.exe", b"MZfake")]);
         assert!(install_verified(&bytes, &path, &"0".repeat(64)).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"previous");
-        std::fs::remove_file(&path).unwrap();
-        std::fs::remove_dir(path.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn verified_archive_installs_only_cli_not_other_omniget_tools() {
-        let path = target("allowlist");
+        let scratch = Scratch::new("allowlist");
+        let path = scratch.target();
         let bytes = archive(&[
             ("omniget-cli.exe", b"MZfake"),
             ("omniget-mcp.exe", b"never install"),
@@ -177,12 +196,7 @@ mod tests {
         ]);
         install_verified(&bytes, &path, &digest(&bytes)).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"MZfake");
-        assert_eq!(
-            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
-            1
-        );
-        std::fs::remove_file(&path).unwrap();
-        std::fs::remove_dir(path.parent().unwrap()).unwrap();
+        assert_eq!(scratch.entries(), 1);
     }
 
     #[test]
@@ -202,39 +216,34 @@ mod tests {
                 vec![("omniget-cli.exe", &b"not an executable"[..])],
             ),
         ] {
+            let scratch = Scratch::new(name);
+            let path = scratch.target();
             let bytes = archive(&entries);
-            let path = target(name);
             assert!(
                 install_verified(&bytes, &path, &digest(&bytes)).is_err(),
                 "{name}"
             );
-            assert!(!path.exists());
-            if path.parent().unwrap().exists() {
-                std::fs::remove_dir(path.parent().unwrap()).unwrap();
-            }
+            assert_eq!(scratch.entries(), 0, "{name} left files behind");
         }
     }
 
     #[test]
     fn replacement_is_complete_and_failed_rename_cleans_only_its_own_staging_file() {
+        let scratch = Scratch::new("replace");
+        let path = scratch.target();
         let bytes = archive(&[("omniget-cli.exe", b"MZnew")]);
-        let path = target("replace");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"MZold").unwrap();
         install_verified(&bytes, &path, &digest(&bytes)).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"MZnew");
+
+        // A directory at the target makes the final rename fail.
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
-        let unrelated = path.parent().unwrap().join("unrelated.tmp");
+        let unrelated = scratch.0.join("unrelated.tmp");
         std::fs::write(&unrelated, b"keep").unwrap();
         assert!(install_verified(&bytes, &path, &digest(&bytes)).is_err());
         assert!(path.is_dir());
-        assert_eq!(
-            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
-            2
-        );
-        std::fs::remove_file(unrelated).unwrap();
-        std::fs::remove_dir(&path).unwrap();
-        std::fs::remove_dir(path.parent().unwrap()).unwrap();
+        assert_eq!(scratch.entries(), 2);
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
     }
 }

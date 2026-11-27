@@ -83,11 +83,23 @@ fn progress(percent: f64) -> Option<CliUpdate> {
         .then(|| CliUpdate::Progress(percent.max(0.0)))
 }
 
+/// Lifecycle of one download. Serialized as the lowercase strings the UI checks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    #[default]
+    Idle,
+    Running,
+    Complete,
+    Failed,
+    Cancelled,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
     pub id: u64,
     pub revision: u64,
-    pub phase: String,
+    pub phase: Phase,
     pub percent: Option<f64>,
     pub file_path: Option<String>,
     pub message: String,
@@ -98,7 +110,7 @@ impl Default for Status {
         Self {
             id: 0,
             revision: 0,
-            phase: "idle".into(),
+            phase: Phase::Idle,
             percent: None,
             file_path: None,
             message: "Paste a video URL to begin.".into(),
@@ -127,7 +139,7 @@ impl Downloads {
 
     pub fn begin(&self) -> Result<(Status, Arc<AtomicBool>), String> {
         let mut job = self.0.lock().map_err(|_| "Download state unavailable.")?;
-        if job.status.phase == "running" {
+        if job.status.phase == Phase::Running {
             return Err(
                 "A download is already running. Cancel it or wait for it to finish.".into(),
             );
@@ -135,7 +147,7 @@ impl Downloads {
         job.status = Status {
             id: job.status.id.saturating_add(1),
             revision: 0,
-            phase: "running".into(),
+            phase: Phase::Running,
             message: "Starting OmniGet…".into(),
             ..Status::default()
         };
@@ -146,7 +158,7 @@ impl Downloads {
 
     pub fn update(&self, id: u64, update: CliUpdate) -> Option<Status> {
         let mut job = self.0.lock().ok()?;
-        if job.status.id != id || job.status.phase != "running" {
+        if job.status.id != id || job.status.phase != Phase::Running {
             return None;
         }
         match update {
@@ -178,29 +190,27 @@ impl Downloads {
 
     pub fn finish(&self, id: u64, result: Result<(), String>) -> Option<Status> {
         let mut job = self.0.lock().ok()?;
-        if job.status.id != id || job.status.phase != "running" {
+        if job.status.id != id || job.status.phase != Phase::Running {
             return None;
         }
         let cancelled = job.cancel.load(Ordering::Relaxed);
         let success =
             result.is_ok() && job.status.file_path.is_some() && !cancelled && !job.reported_failure;
-        job.status.phase = if cancelled {
-            "cancelled"
+        let (phase, message) = if cancelled {
+            (
+                Phase::Cancelled,
+                "Download cancelled. Partial files may remain in Downloads.".to_string(),
+            )
         } else if success {
-            "complete"
+            (Phase::Complete, "Saved to Downloads.".to_string())
         } else {
-            "failed"
-        }
-        .into();
-        job.status.message = if cancelled {
-            "Download cancelled. Partial files may remain in Downloads.".into()
-        } else if success {
-            "Saved to Downloads.".into()
-        } else {
-            result.err().unwrap_or_else(|| {
+            let message = result.err().unwrap_or_else(|| {
                 "OmniGet did not confirm a saved file. Update OmniGet and try again.".into()
-            })
+            });
+            (Phase::Failed, message)
         };
+        job.status.phase = phase;
+        job.status.message = message;
         if success {
             job.status.percent = Some(100.0);
         } else {
@@ -212,7 +222,7 @@ impl Downloads {
 
     pub fn cancel(&self, id: u64) -> Result<(), String> {
         let job = self.0.lock().map_err(|_| "Download state unavailable.")?;
-        if job.status.id == id && job.status.phase == "running" {
+        if job.status.id == id && job.status.phase == Phase::Running {
             job.cancel.store(true, Ordering::Relaxed);
         }
         Ok(())
@@ -321,6 +331,22 @@ mod tests {
     }
 
     #[test]
+    fn phase_serializes_to_the_strings_the_ui_checks() {
+        for (phase, wire) in [
+            (Phase::Idle, "idle"),
+            (Phase::Running, "running"),
+            (Phase::Complete, "complete"),
+            (Phase::Failed, "failed"),
+            (Phase::Cancelled, "cancelled"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&phase).unwrap(),
+                format!("\"{wire}\"")
+            );
+        }
+    }
+
+    #[test]
     fn single_job_guard_stale_updates_and_cancel_are_isolated() {
         let jobs = Downloads::default();
         let (first, cancel) = jobs.begin().unwrap();
@@ -332,7 +358,10 @@ mod tests {
         assert!(!cancel.load(Ordering::Relaxed));
         jobs.cancel(first.id).unwrap();
         assert!(cancel.load(Ordering::Relaxed));
-        assert_eq!(jobs.finish(first.id, Ok(())).unwrap().phase, "cancelled");
+        assert_eq!(
+            jobs.finish(first.id, Ok(())).unwrap().phase,
+            Phase::Cancelled
+        );
         let (second, _) = jobs.begin().unwrap();
         assert!(second.id > first.id);
         assert!(jobs.finish(first.id, Ok(())).is_none());
@@ -340,24 +369,27 @@ mod tests {
             second.id,
             CliUpdate::Complete("C:\\Downloads\\a.mp4".into()),
         );
-        assert_eq!(jobs.status().unwrap().phase, "running");
-        assert_eq!(jobs.finish(second.id, Ok(())).unwrap().phase, "complete");
+        assert_eq!(jobs.status().unwrap().phase, Phase::Running);
+        assert_eq!(
+            jobs.finish(second.id, Ok(())).unwrap().phase,
+            Phase::Complete
+        );
     }
 
     #[test]
     fn exit_failure_or_missing_completion_never_claims_success() {
         let jobs = Downloads::default();
         let (s, _) = jobs.begin().unwrap();
-        assert_eq!(jobs.finish(s.id, Ok(())).unwrap().phase, "failed");
+        assert_eq!(jobs.finish(s.id, Ok(())).unwrap().phase, Phase::Failed);
         let (s, _) = jobs.begin().unwrap();
         jobs.update(s.id, CliUpdate::Complete("video.mp4".into()));
         let failed = jobs.finish(s.id, Err("OmniGet failed.".into())).unwrap();
-        assert_eq!(failed.phase, "failed");
+        assert_eq!(failed.phase, Phase::Failed);
         assert!(failed.file_path.is_none());
         let (s, _) = jobs.begin().unwrap();
         jobs.update(s.id, CliUpdate::Failed);
         jobs.update(s.id, CliUpdate::Complete("video.mp4".into()));
-        assert_eq!(jobs.finish(s.id, Ok(())).unwrap().phase, "failed");
+        assert_eq!(jobs.finish(s.id, Ok(())).unwrap().phase, Phase::Failed);
     }
 
     #[test]

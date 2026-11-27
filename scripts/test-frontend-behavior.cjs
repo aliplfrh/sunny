@@ -695,6 +695,34 @@ test("clipboard footer names the real copy and delete shortcuts", async () => {
   assert.match(f.nodes.hints.innerHTML, /Ctrl<\/kbd><kbd>D<\/kbd> Delete/);
 });
 
+test("every mode keeps its footer title, shortcuts and Back button", async () => {
+  const f = await fixture({ responses: { clip_history: [] } });
+  const footers = {
+    "": { title: "Sunny", actions: ["Open"], back: false, menu: true },
+    clipboard: { title: "Clipboard History", actions: ["Paste", "Copy", "Delete"], back: false, menu: false },
+    emoji: { title: "Emoji Picker", actions: ["Copy"], back: true, menu: false },
+    "qr code": { title: "QR Code Generator", actions: ["Copy Image"], back: true, menu: false },
+    "search files": { title: "Search Files", actions: ["Open", "Reveal"], back: false, menu: true },
+  };
+  for (const [query, expected] of Object.entries(footers)) {
+    await f.run("resetLauncherSearch()");
+    await f.search(query);
+    if (query) {
+      const index = f.run('items.findIndex((item) => item.cmd && item.cmd !== "web")');
+      await f.run(`activate(${index})`);
+    }
+    await f.settle();
+    const html = f.nodes.hints.innerHTML;
+    const label = query || "root";
+    assert.match(html, new RegExp(expected.title), `${label} title`);
+    for (const action of expected.actions) assert.match(html, new RegExp(` ${action}<`), `${label}: ${action}`);
+    assert.equal(/data-back/.test(html), expected.back, `${label} Back button`);
+    assert.equal(/data-actions/.test(html), expected.menu, `${label} Actions menu`);
+    const trailing = expected.back || expected.menu ? 1 : 0;
+    assert.equal((html.match(/hint-sep/g) || []).length, expected.actions.length - 1 + trailing, `${label} separators`);
+  }
+});
+
 test("snapshot events are window-specific, tint changes immediately, and settings opacity has no floor", async () => {
   for (const settingsWindow of [false, true]) {
     const f = await fixture({ settingsWindow, settings: { opacity: 40, blur_ui: true, theme: "light" } });

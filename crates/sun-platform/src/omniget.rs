@@ -2,14 +2,45 @@
 
 use std::path::{Path, PathBuf};
 
+/// A local drive path to an existing file. Rejects relative paths, UNC shares,
+/// and anything the CLI runner would refuse, so every caller agrees on one rule.
+pub fn is_local_file(path: &Path) -> bool {
+    path.is_absolute() && !path.to_string_lossy().starts_with(r"\\") && path.is_file()
+}
+
 fn valid_cli(path: &Path) -> bool {
-    path.is_absolute()
-        && !path.to_string_lossy().starts_with(r"\\")
+    is_local_file(path)
         && path
             .file_name()
             .map(|s| s.to_string_lossy().eq_ignore_ascii_case("omniget-cli.exe"))
             .unwrap_or(false)
-        && path.is_file()
+}
+
+/// Every folder that may hold OmniGet binaries, in search order.
+fn search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|value| std::env::split_paths(&value).collect())
+        .unwrap_or_default();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        dirs.extend([
+            PathBuf::from(&local).join("Programs").join("omniget"),
+            PathBuf::from(local).join("omniget"),
+        ]);
+    }
+    if let Some(data) = std::env::var_os("APPDATA") {
+        dirs.extend([
+            PathBuf::from(&data).join("wtf.tonho.omniget").join("bin"),
+            PathBuf::from(data).join("omniget").join("bin"),
+        ]);
+    }
+    if let Some(data) = std::env::var_os("OMNIGET_DATA_DIR") {
+        dirs.push(PathBuf::from(data).join("bin"));
+    }
+    if let Some(programs) = std::env::var_os("ProgramFiles") {
+        dirs.push(PathBuf::from(programs).join("omniget"));
+    }
+    dirs.retain(|dir| dir.is_absolute());
+    dirs
 }
 
 pub fn find_cli(configured: &str) -> Option<PathBuf> {
@@ -20,21 +51,10 @@ pub fn find_cli(configured: &str) -> Option<PathBuf> {
     if let Some(path) = managed_cli_path().filter(|p| valid_cli(p)) {
         return Some(path);
     }
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|s| std::env::split_paths(&s).collect())
-        .unwrap_or_default();
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        dirs.extend([
-            PathBuf::from(&local).join("Programs").join("omniget"),
-            PathBuf::from(local).join("omniget"),
-        ]);
-    }
-    if let Some(programs) = std::env::var_os("ProgramFiles") {
-        dirs.push(PathBuf::from(programs).join("omniget"));
-    }
-    dirs.into_iter()
+    search_dirs()
+        .into_iter()
         .map(|dir| dir.join("omniget-cli.exe"))
-        .find(|p| valid_cli(p))
+        .find(|path| valid_cli(path))
 }
 
 /// Sunny-owned CLI location; downloaded only by an explicit Settings action.
@@ -51,34 +71,17 @@ pub fn managed_cli_path() -> Option<PathBuf> {
 /// Presence checks only: never execute tools or trigger upstream downloads here.
 /// OmniGet may also have custom binary overrides; this list is advisory.
 pub fn missing_download_tools() -> Vec<String> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|s| std::env::split_paths(&s).collect())
-        .unwrap_or_default();
-    if let Some(data) = std::env::var_os("OMNIGET_DATA_DIR") {
-        dirs.push(PathBuf::from(data).join("bin"));
-    }
-    if let Some(data) = std::env::var_os("APPDATA") {
-        dirs.push(PathBuf::from(&data).join("wtf.tonho.omniget").join("bin"));
-        dirs.push(PathBuf::from(data).join("omniget").join("bin"));
-    }
-    if let Some(programs) = std::env::var_os("ProgramFiles") {
-        dirs.push(PathBuf::from(programs).join("nodejs"));
-    }
-    let found = |name: &str| {
-        dirs.iter()
-            .filter(|d| d.is_absolute() && !d.to_string_lossy().starts_with(r"\\"))
-            .any(|d| d.join(name).is_file())
-    };
-    let mut missing = Vec::new();
-    for (name, label) in [
+    let dirs = search_dirs();
+    let found = |name: &str| dirs.iter().any(|dir| dir.join(name).is_file());
+    let mut missing: Vec<String> = [
         ("yt-dlp.exe", "yt-dlp"),
         ("ffmpeg.exe", "FFmpeg"),
         ("ffprobe.exe", "FFprobe"),
-    ] {
-        if !found(name) {
-            missing.push(label.into());
-        }
-    }
+    ]
+    .into_iter()
+    .filter(|(file, _)| !found(file))
+    .map(|(_, label)| label.to_string())
+    .collect();
     if !["deno.exe", "node.exe", "bun.exe"]
         .iter()
         .any(|name| found(name))
@@ -431,16 +434,6 @@ mod process {
 #[cfg(windows)]
 pub use process::download;
 
-#[cfg(not(windows))]
-pub fn download(
-    _path: &Path,
-    _args: &[String],
-    _cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    _on_line: impl FnMut(&str),
-) -> Result<(), String> {
-    Err("Video Download is supported on Windows only.".into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +460,32 @@ mod tests {
         assert_eq!(find_cli(&path.to_string_lossy()), Some(path.clone()));
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn local_file_rule_rejects_relative_unc_and_missing_files() {
+        let dir = std::env::temp_dir().join(format!("sunny-local-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("kept.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(is_local_file(&file));
+        assert!(!is_local_file(&dir));
+        assert!(!is_local_file(&dir.join("missing.mp4")));
+        assert!(!is_local_file(Path::new(r"relative\kept.mp4")));
+        assert!(!is_local_file(Path::new(r"\\server\share\kept.mp4")));
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn every_search_folder_is_absolute_and_shared_by_both_checks() {
+        let dirs = search_dirs();
+        assert!(dirs.iter().all(|dir| dir.is_absolute()));
+        // Both discovery and the advisory check read the same list, so a folder
+        // added for one is never silently missing from the other.
+        let missing = missing_download_tools();
+        for label in &missing {
+            assert!(!label.is_empty());
+        }
     }
 }

@@ -86,7 +86,7 @@ impl OmnigetSetupState {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .map_err(|_| "OmniGet setup is already running.")?;
         let guard = OmnigetSetupGuard(&self.busy);
-        if downloads.status()?.phase == "running" {
+        if downloads.status()?.phase == sun_core::video::Phase::Running {
             return Err(
                 "Cancel or finish the active video download before setting up OmniGet.".into(),
             );
@@ -578,7 +578,7 @@ async fn video_setup(app: tauri::AppHandle) -> Result<OmnigetInstallation, Strin
     let state = app.state::<OmnigetSetupState>();
     let guard = state.reserve(&app.state::<sun_core::video::Downloads>())?;
     let target = sun_platform::omniget::managed_cli_path()
-        .filter(|p| p.is_absolute() && !p.to_string_lossy().starts_with(r"\\"))
+        .filter(|path| path.is_absolute() && !path.to_string_lossy().starts_with(r"\\"))
         .ok_or("The local Sunny tools folder is unavailable.")?;
     emit_omniget_setup(&app, "Downloading official OmniGet CLI (~25 MB)…", Some(0));
     let handle = app.clone();
@@ -612,6 +612,27 @@ fn emit_video_status(app: &tauri::AppHandle, status: sun_core::video::Status) {
     let _ = app.emit_to("main", "sunny:video-progress", status);
 }
 
+/// Streams one CLI run into the shared job state and always finishes it.
+fn run_download(
+    app: tauri::AppHandle,
+    path: std::path::PathBuf,
+    args: Vec<String>,
+    id: u64,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use sun_core::video::Downloads;
+    let result = sun_platform::omniget::download(&path, &args, cancel, |line| {
+        if let Some(update) = sun_core::video::parse_line(line) {
+            if let Some(status) = app.state::<Downloads>().update(id, update) {
+                emit_video_status(&app, status);
+            }
+        }
+    });
+    if let Some(status) = app.state::<Downloads>().finish(id, result) {
+        emit_video_status(&app, status);
+    }
+}
+
 /// Download explicitly through the separately installed OmniGet CLI, never a shell.
 #[tauri::command]
 async fn video_start(
@@ -628,47 +649,47 @@ async fn video_start(
         .omniget_cli_path
         .clone();
     background(move || {
-        let output = app.path().download_dir().map_err(|_| "Windows Downloads folder is unavailable.")?;
+        let output = app
+            .path()
+            .download_dir()
+            .map_err(|_| "Windows Downloads folder is unavailable.")?;
         let args = sun_core::video::download_args(&url, &quality, &output.to_string_lossy())?;
-        let path = sun_platform::omniget::find_cli(&configured).ok_or("OmniGet CLI was not found. Install OmniGet and select omniget-cli.exe in Settings → General.")?;
-        let (status, cancel) = app.state::<OmnigetSetupState>().begin_download(&app.state::<Downloads>())?;
-        let id = status.id;
+        let path = sun_platform::omniget::find_cli(&configured).ok_or(
+            "OmniGet CLI was not found. Install OmniGet and select omniget-cli.exe in Settings → General.",
+        )?;
+        let (status, cancel) = app
+            .state::<OmnigetSetupState>()
+            .begin_download(&app.state::<Downloads>())?;
         let worker = app.clone();
-        let started = std::thread::Builder::new().name("sunny-video-download".into()).spawn(move || {
-            let result = sun_platform::omniget::download(&path, &args, cancel, |line| {
-                if let Some(update) = sun_core::video::parse_line(line) {
-                    if let Some(status) = worker.state::<Downloads>().update(id, update) {
-                        emit_video_status(&worker, status);
-                    }
-                }
+        let spawned = std::thread::Builder::new()
+            .name("sunny-video-download".into())
+            .spawn({
+                let id = status.id;
+                move || run_download(worker, path, args, id, cancel)
             });
-            if let Some(status) = worker.state::<Downloads>().finish(id, result) {
-                emit_video_status(&worker, status);
-            }
-        });
-        if started.is_err() {
+        if spawned.is_err() {
             let message = "Could not start the download worker.".to_string();
-            if let Some(status) = app.state::<Downloads>().finish(id, Err(message.clone())) {
-                emit_video_status(&app, status);
+            if let Some(failed) = app.state::<Downloads>().finish(status.id, Err(message.clone())) {
+                emit_video_status(&app, failed);
             }
             return Err(message);
         }
         Ok(status)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
 async fn video_reveal(app: tauri::AppHandle, id: u64) -> Result<(), String> {
     let status = app.state::<sun_core::video::Downloads>().status()?;
-    if status.id != id || status.phase != "complete" {
+    if status.id != id || status.phase != sun_core::video::Phase::Complete {
         return Err("There is no completed download to reveal.".into());
     }
     let path = status
         .file_path
         .ok_or("The saved file path is unavailable.")?;
     background(move || {
-        let file = std::path::Path::new(&path);
-        if !file.is_absolute() || path.starts_with(r"\\") || !file.is_file() {
+        if !sun_platform::omniget::is_local_file(std::path::Path::new(&path)) {
             return Err("The downloaded file could not be found on this computer.".into());
         }
         reveal_path(path)

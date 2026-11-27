@@ -396,54 +396,38 @@ function renderDetail(c) {
 }
 
 /* Footer labels reflect actual actions; emoji has no implicit entry shortcut. */
+const FOOTER_HINTS = {
+  clip: { title: "Clipboard History", icon: true, actions: [
+    ["Enter", "Paste"], ["Ctrl+B", "Copy"], ["Ctrl+D", "Delete"],
+  ] },
+  emoji: { title: "Emoji Picker", actions: [["Enter", "Copy"]], back: true },
+  video: { title: "Video Download", actions: [["Enter", "Download"]], back: true },
+  qr: { title: "QR Code Generator", actions: [["Enter", "Copy Image"]], back: true },
+  files: { title: "Search Files", icon: true, actions: [["Enter", "Open"], ["Ctrl+R", "Reveal"]], actionsMenu: true },
+};
+
+function footerHintKeys(keys) {
+  return keys.split("+").map((key) => `<kbd>${key}</kbd>`).join("");
+}
+
+function footerActionsButton() {
+  const modifier = SETTINGS.vim_nav ? "<kbd>Ctrl</kbd><kbd>Shift</kbd>" : "<kbd>Ctrl</kbd>";
+  const disabled = hasActions(items[selected]) ? "" : " disabled";
+  return `<button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${disabled}>${modifier}<kbd>K</kbd> Actions</button>`;
+}
+
 function renderFooter() {
-  if (mode === "clip") {
-    hintsEl.innerHTML = `
-      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Clipboard History</span>
+  const hints = FOOTER_HINTS[mode] ?? { title: "Sunny", icon: true, actions: [["Enter", "Open"]], actionsMenu: true };
+  const icon = hints.icon ? '<img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />' : "";
+  const actions = hints.actions.map(([keys, label]) =>
+    `<span class="hint-action">${footerHintKeys(keys)} ${label}</span>`).join('<span class="hint-sep"></span>');
+  const trailing = hints.back
+    ? '<button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>'
+    : hints.actionsMenu ? footerActionsButton() : "";
+  hintsEl.innerHTML = `
+      <span class="hint-strong">${icon}${hints.title}</span>
       <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Paste</span>
-      <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>B</kbd> Copy</span>
-      <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>D</kbd> Delete</span>`;
-  } else if (mode === "emoji") {
-    hintsEl.innerHTML = `
-      <span class="hint-strong">Emoji Picker</span>
-      <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Copy</span>
-      <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
-  } else if (mode === "video") {
-    hintsEl.innerHTML = `
-      <span class="hint-strong">Video Download</span>
-      <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Download</span>
-      <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
-  } else if (mode === "qr") {
-    hintsEl.innerHTML = `
-      <span class="hint-strong">QR Code Generator</span>
-      <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Copy Image</span>
-      <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-back>Back <kbd>Esc</kbd></button>`;
-  } else if (mode === "files") {
-    hintsEl.innerHTML = `
-      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Search Files</span>
-      <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Open</span>
-      <span class="hint-sep"></span>
-      <span class="hint-action"><kbd>Ctrl</kbd><kbd>R</kbd> Reveal</span>
-      <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${hasActions(items[selected]) ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
-  } else {
-    hintsEl.innerHTML = `
-      <span class="hint-strong"><img class="hint-icon" src="sunny-icon.png" alt="" draggable="false" />Sunny</span>
-      <span class="spacer"></span>
-      <span class="hint-action"><kbd>↵</kbd> Open</span>
-      <span class="hint-sep"></span>
-      <button class="hint-action hint-button" type="button" data-actions aria-haspopup="menu" aria-controls="actions" aria-expanded="${actionsOpen}"${hasActions(items[selected]) ? "" : " disabled"}><kbd>Ctrl</kbd>${SETTINGS.vim_nav ? "<kbd>Shift</kbd>" : ""}<kbd>K</kbd> Actions</button>`;
-  }
+      ${actions}${trailing ? `<span class="hint-sep"></span>${trailing}` : ""}`;
   hintsEl.querySelector("[data-actions]")?.addEventListener("click", toggleActions);
   hintsEl.querySelector("[data-back]")?.addEventListener("click", backToApps);
 }
