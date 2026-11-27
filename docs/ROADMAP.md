@@ -2,7 +2,7 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
-## Release v1.2.0 — Raycast-informed search and settings
+## Release v2.0.0 - Raycast-informed search and settings
 
 Research: `docs/research/raycast-ux-teardown.md` (Raycast 2.14.0, read-only).
 
