@@ -2,6 +2,39 @@
 
 Port of Vicinae's core features (C++23/Qt) → Rust + Tauri v2. Windows-only, GPL-3.0.
 
+## Release v1.2.0 — Raycast-informed search and settings
+
+Research: `docs/research/raycast-ux-teardown.md` (Raycast 2.14.0, read-only).
+
+- [x] **Verified fuzzy matcher.** `sun-core::match_rank` ports Raycast's scoring
+      (first 4 / word-boundary 3 / consecutive 2 / separator 1) with `low`,
+      `medium` and `high` admission tiers. Validated against **126 golden vectors**
+      generated from Raycast's own shipped code (`scripts/raycast-matcher-reference.mjs`),
+      not against hand-written expectations.
+- [x] **Root search uses `Tier::High`**, so weak scattered matches are dropped
+      instead of ranked last. `cfg` no longer returns Microsoft Edge; `tti` no
+      longer returns Settings.
+- [x] **`keywords` aliases.** Acronyms like `vsc` resolve through declared aliases
+      rather than long-gap fuzzy matching. Apps carry `AppEntry.keywords`; commands
+      carry per-keyword lists.
+- [x] **`rootSearch` metadata per command** (`when`, `matching: default|named`,
+      `section`) replaces the hard-coded `cmd !== "files"` special case.
+- [x] **Section integrity.** `mergeSections()` keeps sections contiguous so a
+      heading is never emitted twice; commands are a peer section, not a prefix
+      of Results.
+- [x] **`requiresManualSelection`.** Video Download refuses Enter until the user
+      moves the highlight; the row is visibly marked and the status line says what
+      to press. Clicks and the Actions menu still count as explicit.
+- [x] **Usage tiebreak.** `rank_with_usage` orders name match → score → launch
+      count → name → path. A habit can only reorder an exact tie.
+- [x] **Settings UX:** section-name matching in the settings filter, a per-row
+      reset-to-default affordance, a real empty state with a Clear search action,
+      and inline current values on toggles and segmented controls.
+- [x] Non-ASCII app names and paths stay searchable (`Café`, `Jürgen`) by folding
+      to the matcher's separator instead of being rejected.
+- [ ] Live Windows check of the new ordering on a real installed-app list, and of
+      the settings reset/empty-state interactions in the running app.
+
 ## Release v1.1.1 — OmniGet setup could hang
 
 - [x] **Fixed:** Download OmniGet CLI stopped at "Please wait…" forever. The HTTPS
@@ -84,7 +117,7 @@ These are core microbenchmarks, not installed-app typing/opening latency measure
 - [x] Raycast-style overlay window: frameless, always on top, centered, global hotkey (default: Alt+Space), close on Esc / focus loss
 
 ## Phase 1 — MVP (usable launcher) ✅
-- [x] Fuzzy search engine (SkimMatcherV2 — concept ported from Vicinae)
+- [x] Fuzzy search engine (`match_rank` — Raycast's matcher, verified against captured vectors)
 - [x] Windows application index (recursive Start Menu `.lnk` scan)
 - [x] In-memory app cache (no disk IO per keystroke)
 - [x] Real application icons (`SHGetFileInfoW` → `HICON` → PNG, disk cache)
@@ -115,7 +148,7 @@ These are core microbenchmarks, not installed-app typing/opening latency measure
 - [x] **File search** (Raycast-style "Search Files")
   - [x] Background index of the user profile (Desktop, Documents, Downloads, Pictures, Music,
         Videos + home) with depth/size limits and skipped dev/system folders
-  - [x] Fuzzy name matching (`SkimMatcherV2`) with path fallback, top 60 results
+  - [x] Fuzzy name matching (`match_rank`, same matcher as apps) with path fallback, top 60 results
   - [x] Dedicated file mode: type-aware folder/file glyphs, parent path in the row, live indexing state
   - [x] `Enter` opens with the default app; `Ctrl+R` reveals the file in File Explorer
   - [x] Index built once per launch on a background thread; UI never blocks on disk IO
@@ -141,6 +174,14 @@ These are core microbenchmarks, not installed-app typing/opening latency measure
   - [x] About Sunny: version, license, bundled font, emoji data source, platform,
         **Check for Updates** (signed auto-update via `tauri-plugin-updater`)
   - [x] Live preview while dragging; tray menu entry and `Ctrl+,`; search-only `Settings` command
+  - [x] Settings search matches a row's own text **and its section name** ("window" lists
+        Opacity, Blur UI, Window Mode and Show Footer Hints), and a search with no match shows
+        an empty state with a **Clear search** button
+  - [x] Every row that differs from its shipped default offers a per-row **Reset to default**
+        (↺) — not for the hotkey or the OmniGet CLI path, which belong to the user; the
+        defaults table is checked against `Settings::default()` by a Rust test
+  - [x] The current value is printed beside switches and segmented controls ("On"/"Off",
+        "System", "Expanded") so a row can be read without touching the control
   - [x] Reliable persistence: single-instance guard (no competing writers) and pending-save flush
         when the panel closes or the window hides
 - [x] **Auto-update** — signed NSIS updater artifacts published by GitHub Actions

@@ -11,6 +11,7 @@ pub mod emoji;
 pub mod files;
 pub mod launcher;
 pub mod lorem;
+pub mod match_rank;
 pub mod omniget_setup;
 pub mod qr;
 pub mod search;

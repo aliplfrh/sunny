@@ -534,6 +534,16 @@ body.no-footer .action-menu {
   background: var(--accent);
 }
 
+/* Highlighted but not yet acknowledged: Enter will not run it, so the accent
+   bar is replaced by a muted one instead of promising an action. */
+.item.selected.needs-pick::before {
+  background: var(--text-dim);
+}
+.item.needs-pick .sub-inline,
+.item.needs-pick .sub {
+  font-style: italic;
+}
+
 .empty {
   padding: 28px 16px;
   text-align: center;
@@ -994,6 +1004,38 @@ kbd {
   color: var(--text-dim);
   font-size: calc(var(--fs) * 0.9);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.settings-empty-title {
+  color: var(--text);
+  font-size: calc(var(--fs) * 0.93);
+  overflow-wrap: anywhere;
+}
+.settings-empty-hint {
+  line-height: 1.45;
+  max-width: 320px;
+}
+.settings-empty .link-btn {
+  margin-top: 4px;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: calc(var(--fs) * 0.82);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.settings-empty .link-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-border);
+}
+.settings-empty .link-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .settings-section {
@@ -1046,6 +1088,47 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Current value printed beside a control, so a row can be read without
+   interpreting the widget ("14 px", "Expanded", "On"). */
+.settings-row .row-value {
+  color: var(--text-dim);
+  font-size: calc(var(--fs) * 0.82);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.toggle-control,
+.segment-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Per-row "Reset to default". Muted until focused so a changed row never
+   competes with the control the user actually came for. */
+.settings-row .row-reset {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: calc(var(--fs) * 0.86);
+  line-height: 1;
+  cursor: pointer;
+}
+.settings-row .row-reset:hover {
+  background: var(--field-hover);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.settings-row .row-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .settings-error {
   color: var(--error);

@@ -31,6 +31,7 @@ fn main() {
             icon: Some("x".repeat(32_000)),
             source: "start-menu",
             category: "Application",
+            keywords: Vec::new(),
         })
         .collect();
     let start = Instant::now();

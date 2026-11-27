@@ -219,7 +219,7 @@ fn load_app_index() -> Vec<sun_core::apps::AppEntry> {
             app_id: app.app_id,
         })
         .collect();
-    sun_core::apps::merge_store_apps(shortcuts, store)
+    sun_core::apps::shell_apps(sun_core::apps::merge_store_apps(shortcuts, store))
 }
 
 /// Run disk/OS work on a standard background thread without blocking the command loop.
@@ -268,7 +268,15 @@ async fn search_apps(
     app: tauri::AppHandle,
 ) -> Result<Vec<sun_core::search::Ranked<sun_core::apps::AppEntry>>, String> {
     background(move || {
-        let mut hits = sun_core::search::rank(&query, &app_index(&app)?);
+        // Usage only breaks ties; the launcher history lock is held briefly and
+        // never across an await, and its numbers stay out of the payload.
+        let state = app.state::<LauncherState>();
+        let mut hits = {
+            let history = state.0.lock().map_err(|_| "Launcher history unavailable")?;
+            sun_core::search::rank_with_usage(&query, &app_index(&app)?, &|path| {
+                history.usage_count(path)
+            })
+        };
         // Icons dominate the payload; only the best matches are ever rendered.
         hits.truncate(60);
         Ok(hits)

@@ -108,6 +108,16 @@ impl LauncherHistory {
         self.commit(next)
     }
 
+    /// How many times this app has been launched, for search tiebreaks.
+    /// Returns 0 for unknown paths, so a missing entry never hides an app.
+    pub fn usage_count(&self, path: &str) -> i64 {
+        app_key(path)
+            .ok()
+            .and_then(|key| self.data.usage.get(&key).map(|usage| usage.launch_count))
+            .map(|count| count.min(i64::MAX as u64) as i64)
+            .unwrap_or(0)
+    }
+
     /// Count one successful launch. Never call this for failed launch attempts.
     pub fn record_launch(&mut self, path: &str) -> Result<(), String> {
         let key = app_key(path)?;
@@ -245,11 +255,28 @@ mod tests {
             source: "start-menu",
             category: "Application",
             icon: None,
+            keywords: Vec::new(),
         }
     }
 
     fn names(apps: &[AppEntry]) -> Vec<&str> {
         apps.iter().map(|app| app.name.as_str()).collect()
+    }
+
+    #[test]
+    fn usage_count_is_exposed_for_tiebreaks_without_leaking_records() {
+        let apps = vec![app("Alpha"), app("Beta")];
+        let mut history = LauncherHistory::in_memory();
+        assert_eq!(history.usage_count(&apps[0].path), 0, "unknown app is zero");
+        history.record_launch(&apps[0].path).unwrap();
+        history.record_launch(&apps[0].path).unwrap();
+        assert_eq!(history.usage_count(&apps[0].path), 2);
+        assert_eq!(history.usage_count(&apps[1].path), 0);
+        // Windows path variants resolve to the same counter.
+        let variant = apps[0].path.replace('\\', "/").to_uppercase();
+        assert_eq!(history.usage_count(&variant), 2);
+        // An unusable path is 0, never a panic or an error.
+        assert_eq!(history.usage_count(""), 0);
     }
 
     #[test]

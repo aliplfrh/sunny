@@ -2,14 +2,15 @@
 //!
 //! Strategi MVP: indeks nama file dari folder pengguna (Desktop, Documents,
 //! Downloads, Pictures, Music, Videos, dan home) dibangun di background,
-//! lalu dicari dengan fuzzy matcher yang sama seperti aplikasi.
+//! lalu dicari dengan fuzzy matcher yang sama seperti aplikasi
+//! ([`crate::match_rank`], port matcher Raycast).
 //!
 //! Tidak ada driver/USN journal — cukup `fs::read_dir` rekursif dengan batas
 //! kedalaman, jumlah entri, dan daftar folder yang dilewati (AppData,
 //! node_modules, .git, target, dsb) agar tetap ringan.
 
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
+use crate::match_rank::{self, Tier};
+use crate::search::write_searchable;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
@@ -182,6 +183,42 @@ fn walk(
 
 /// Cari file/folder berdasarkan nama (fallback ke path) — hasil terbaik dulu.
 ///
+/// Urutannya: kecocokan nama selalu di atas kecocokan path, lalu skor matcher.
+/// A file only belongs in the root search when its name is really about the
+/// query: the query must appear as a word start inside the name, or as a
+/// contiguous run. Subsequence-only hits are left to Files mode.
+fn names_the_query(name: &str, needle: &str) -> bool {
+    let mut folded = String::with_capacity(name.len());
+    write_searchable(name, &mut folded);
+    let folded = folded.to_lowercase();
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() {
+        return false;
+    }
+    if folded.contains(&needle) {
+        return true;
+    }
+    // Word start: the query begins a token after a separator or a camel hump.
+    let bytes = folded.as_bytes();
+    let mut from = 0;
+    while let Some(offset) = folded[from..].find(&needle) {
+        let start = from + offset;
+        let at_boundary = start == 0
+            || matches!(
+                bytes[start - 1],
+                b'\t' | b'\n' | b' ' | b'-' | b'.' | b'/' | b'(' | b')' | b'[' | b']'
+            );
+        if at_boundary {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
+/// Keduanya harus lolos [`Tier::High`], jadi kecocokan lemah dibuang alih-alih
+/// ditampilkan paling bawah.
+///
 /// Optimasi: pencocokan path lengkap hanya dijalankan bila hasil nama masih
 /// sedikit. Untuk kueri pendek yang umum (mis. "doc"), pass kedua dilewati
 /// sehingga 60 ribu entri tetap responsif.
@@ -190,27 +227,55 @@ pub fn search(index: &[FileEntry], query: &str, limit: usize) -> Vec<RankedFile>
     if q.is_empty() {
         return Vec::new();
     }
-    let matcher = SkimMatcherV2::default().ignore_case();
-    // (index, skor, cocok-di-nama?) — hasil nama selalu di atas fallback path.
+    // Satu buffer dipakai ulang: pass path menyentuh puluhan ribu entri, jadi
+    // alokasi per entri tidak boleh terjadi.
+    let mut needle = String::with_capacity(q.len());
+    write_searchable(q, &mut needle);
+    let query_len = needle.chars().count() as i64;
+    let mut buffer = String::with_capacity(260);
+    // (indeks, skor, cocok-di-nama?) — hasil nama selalu di atas fallback path.
     let mut scored: Vec<(usize, i64, bool)> = Vec::new();
     let mut name_hit = vec![false; index.len()];
 
     for (i, item) in index.iter().enumerate() {
         // Nama file lebih relevan daripada path lengkap.
-        if let Some(s) = matcher.fuzzy_match(&item.name, q) {
+        write_searchable(&item.name, &mut buffer);
+        let matched = match_rank::score(&buffer, &needle);
+        // Berkas hasil pencarian root harus benar-benar dinamai kueri, bukan
+        // sekadar memuat hurufnya berurutan. Tanpa ini "cfg" menemukan
+        // "closedFolderGroup.svg" dan "vsc" menemukan "vicinae-store-view.cpp",
+        // sehingga hasil aplikasi tenggelam. Pencarian di mode Files tetap
+        // memakai ambang yang lebih longgar karena di sana file memang targetnya.
+        if matched.admits(Tier::High, query_len) && names_the_query(&item.name, &needle) {
             name_hit[i] = true;
-            scored.push((i, s + 15, true));
+            scored.push((i, matched.rank(), true));
         }
     }
 
     let path_query = q.contains('\\') || q.contains('/');
     if path_query || scored.len() < limit {
+        // Satu komponen path pada satu waktu. Menilai path utuh membuat "cfg"
+        // cocok dengan "C:\...\Comparison of ...\growth...pdf" karena hurufnya
+        // tersebar di tiga nama folder berbeda; pengguna yang mengetik "cfg"
+        // ingin folder/berkas bernama cfg*, bukan path acak.
         for (i, item) in index.iter().enumerate() {
             if name_hit[i] {
                 continue;
             }
-            if let Some(s) = matcher.fuzzy_match(&item.path, q) {
-                scored.push((i, s, false));
+            let mut best: Option<i64> = None;
+            for component in item.path.split(['\\', '/']) {
+                if component.is_empty() {
+                    continue;
+                }
+                write_searchable(component, &mut buffer);
+                let matched = match_rank::score(&buffer, &needle);
+                if matched.admits(Tier::High, query_len) && names_the_query(component, &needle) {
+                    let rank = matched.rank();
+                    best = Some(best.map_or(rank, |current| current.max(rank)));
+                }
+            }
+            if let Some(rank) = best {
+                scored.push((i, rank, false));
             }
         }
     }
@@ -255,7 +320,12 @@ mod tests {
     #[test]
     fn matches_by_name_case_insensitive() {
         let hits = search(&sample(), "report", 10);
-        assert_eq!(hits.len(), 1);
+        assert_eq!(
+            hits.len(),
+            1,
+            "hits: {:?}",
+            hits.iter().map(|h| &h.item.name).collect::<Vec<_>>()
+        );
         assert_eq!(hits[0].item.name, "Report.pdf");
     }
 
@@ -267,9 +337,66 @@ mod tests {
     }
 
     #[test]
-    fn respects_limit() {
-        let hits = search(&sample(), "s", 2);
+    fn name_hits_sort_above_path_hits() {
+        // "doc" cocok di nama Documents dan di path notes.txt (folder induknya).
+        let index = vec![
+            entry("notes.txt", r"C:\Users\me\Documents\notes.txt", false),
+            entry("Documents", r"C:\Users\me\Documents", true),
+        ];
+        let hits = search(&index, "doc", 10);
         assert_eq!(hits.len(), 2);
+        // Hasil nama selalu di atas fallback path, walau skornya lebih rendah.
+        assert_eq!(hits[0].item.name, "Documents");
+        assert_eq!(hits[1].item.name, "notes.txt");
+    }
+
+    #[test]
+    fn respects_limit() {
+        let index = vec![
+            entry("notes.txt", r"C:\a\notes.txt", false),
+            entry("notes-2.txt", r"C:\b\notes-2.txt", false),
+            entry("notes-3.txt", r"C:\c\notes-3.txt", false),
+        ];
+        assert_eq!(search(&index, "notes", 2).len(), 2);
+        assert_eq!(search(&index, "notes", 10).len(), 3);
+    }
+
+    #[test]
+    fn weak_matches_are_dropped_instead_of_ranked_last() {
+        // "s" di tengah kata bukan awal kata: matcher menolaknya di Tier::High,
+        // jadi "notes.txt" tidak lagi muncul sebagai hasil terakhir.
+        let hits = search(&sample(), "s", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].item.name, "sunny.rs");
+    }
+
+    #[test]
+    fn a_folder_in_the_middle_of_a_path_is_findable() {
+        let index = vec![entry(
+            "main.rs",
+            r"C:\Users\me\Documents\Projects\alpha\main.rs",
+            false,
+        )];
+        // Pemisah `\` diperlakukan seperti `/`, jadi nama folder tetap awal kata.
+        let hits = search(&index, "projects", 10);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].score > 0);
+    }
+
+    #[test]
+    fn non_ascii_names_and_paths_stay_searchable() {
+        let index = vec![
+            entry("Café.txt", r"C:\Users\me\Documents\Café.txt", false),
+            entry("notes.txt", r"C:\Users\Jürgen\notes.txt", false),
+        ];
+        // Nama beraksen cocok persis, baik diketik dengan aksen...
+        assert_eq!(search(&index, "café", 10)[0].item.name, "Café.txt");
+        // ...maupun lewat bagian ASCII-nya.
+        assert_eq!(search(&index, "caf", 10)[0].item.name, "Café.txt");
+        // Path beraksen tidak lagi hilang dari hasil pencarian folder induknya.
+        assert!(search(&index, "jürgen", 10)
+            .iter()
+            .any(|hit| hit.item.name == "notes.txt"));
     }
 
     #[test]

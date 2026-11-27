@@ -23,7 +23,7 @@ Upstream structure (shallow clone in `reference/vicinae`, as of Nov 2026):
 | `apps/sunny` (UI) | Vicinae QML UI | REWRITE — Raycast-like web UI (WebView2, not Qt Quick) |
 | `apps/sunny` (backend) | `src/server`, `src/main*` | Rust + Tauri v2: frameless window, overlay, hotkey, tray |
 | `crates/sun-core` | `src/lib/common`, search/ranking, settings, storage | Port to Rust with equivalent semantics (not line by line) |
-| `crates/sun-core: fuzzy` | `src/lib/fuzzy` | Map behavior to `SkimMatcherV2` (`fuzzy-matcher`) — ✅ initial scaffold |
+| `crates/sun-core: fuzzy` | `src/lib/fuzzy` | `match_rank`: Raycast's matcher ported and verified against 126 captured vectors — ✅ |
 | `crates/sun-core: apps` | app service (app scanner/launcher) | Windows: enumerate Start Menu .lnk files — ✅ initial scaffold |
 | `crates/sun-core: calculator` | `src/lib/soulver` (Soulver backend) | Rust: `meval`/`evalexpr` for Phase 1 |
 | `crates/sun-core: settings` | settings/config service | Windows: JSON at `%LOCALAPPDATA%\Sunny`, single-instance guard, debounced UI writes — ✅ |

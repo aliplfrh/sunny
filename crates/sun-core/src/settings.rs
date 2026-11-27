@@ -493,3 +493,130 @@ mod search_engine_tests {
         assert_eq!(s.search_engine, "google");
     }
 }
+
+// The Settings window offers a per-row "Reset to default" from a single table in
+// `apps/sunny/ui/main.js`. That table is the UI's copy of the shipped values, so
+// it must not drift from `Settings::default()`.
+#[cfg(test)]
+mod reset_defaults_tests {
+    use super::*;
+
+    /// The `SETTINGS_DEFAULTS = { ... }` block from the settings UI, as
+    /// (field, JSON value) pairs.
+    fn ui_reset_defaults() -> Vec<(String, serde_json::Value)> {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sunny/ui/main.js");
+        let source = fs::read_to_string(&path).expect("read the settings UI source");
+        let start = source
+            .find("const SETTINGS_DEFAULTS = {")
+            .expect("the UI declares a SETTINGS_DEFAULTS table")
+            + "const SETTINGS_DEFAULTS = {".len();
+        let end = start
+            + source[start..]
+                .find("\n};")
+                .expect("the SETTINGS_DEFAULTS table is closed");
+
+        source[start..end]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .map(|line| {
+                let (field, raw) = line
+                    .split("//")
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .trim_end_matches(',')
+                    .split_once(':')
+                    .expect("every entry is `field: value`");
+                let value = match raw.trim() {
+                    "true" => serde_json::Value::Bool(true),
+                    "false" => serde_json::Value::Bool(false),
+                    text if text.starts_with('"') && text.ends_with('"') => {
+                        serde_json::Value::String(text.trim_matches('"').to_string())
+                    }
+                    number => serde_json::Value::Number(
+                        number
+                            .parse::<u64>()
+                            .expect("only whole-number settings appear here")
+                            .into(),
+                    ),
+                };
+                (field.trim().to_string(), value)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reset_defaults_table_matches_settings_default() {
+        let defaults = serde_json::to_value(Settings::default()).unwrap();
+        let table = ui_reset_defaults();
+        assert!(
+            !table.is_empty(),
+            "the table must list the resettable fields"
+        );
+        for (field, value) in table {
+            assert_eq!(
+                defaults.get(&field),
+                Some(&value),
+                "{field} in SETTINGS_DEFAULTS must equal Settings::default().{field}"
+            );
+        }
+    }
+
+    /// Fields that deliberately get no per-row reset, with the reason.
+    const NOT_RESETTABLE: [(&str, &str); 3] = [
+        (
+            "hotkey",
+            "resetting would silently unbind the user's own shortcut",
+        ),
+        (
+            "omniget_cli_path",
+            "resetting would discard the CLI the user chose",
+        ),
+        (
+            "emoji_prefix",
+            "legacy load-compatible field with no row in the UI",
+        ),
+    ];
+
+    #[test]
+    fn reset_defaults_table_covers_every_setting_but_the_identity_fields() {
+        let table: Vec<String> = ui_reset_defaults()
+            .into_iter()
+            .map(|(field, _)| field)
+            .collect();
+        let all = serde_json::to_value(Settings::default()).unwrap();
+        let all_fields = all.as_object().expect("settings serialize to an object");
+        for (field, reason) in NOT_RESETTABLE {
+            assert!(
+                !table.iter().any(|entry| entry == field),
+                "{field} must not be resettable: {reason}"
+            );
+        }
+        // Every remaining field is covered, so adding a setting forces a
+        // decision: give it a default here, or add it to NOT_RESETTABLE.
+        for field in all_fields.keys() {
+            if NOT_RESETTABLE.iter().any(|(name, _)| name == field) {
+                continue;
+            }
+            assert!(
+                table.iter().any(|entry| entry == field),
+                "{field} has no SETTINGS_DEFAULTS entry in apps/sunny/ui/main.js"
+            );
+        }
+        assert_eq!(table.len(), all_fields.len() - NOT_RESETTABLE.len());
+    }
+
+    #[test]
+    fn every_reset_default_is_a_value_normalize_keeps() {
+        // A default that normalize() would rewrite would make the row show a
+        // reset button that never disappears.
+        let mut settings = Settings::default();
+        settings.normalize();
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap(),
+            serde_json::to_value(Settings::default()).unwrap()
+        );
+    }
+}

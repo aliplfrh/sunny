@@ -98,6 +98,11 @@ const settingsReady = invoke("settings_get")
   });
 let items = [];
 let selected = 0;
+// True once the user has deliberately moved the highlight. Rows marked
+// `requiresManualSelection` refuse Enter until then, so a surprising or
+// destructive action can never be triggered by the row that merely happens to
+// be first. Reset wherever `selected` is reset.
+let selectionMoved = false;
 let launcherHome = { favorites: [], suggestions: [] };
 let homeSeq = 0;
 let actionsOpen = false;
@@ -128,19 +133,35 @@ let omnigetSetupView = null;
 let videoState = { id: 0, revision: 0, phase: "idle", percent: null, file_path: null, message: "Paste a video URL to begin." };
 
 // Perintah internal — hanya muncul saat dicari (bukan di daftar default).
+//
+// `rootSearch` replaces the old ad-hoc visibility rules (see the Raycast
+// teardown in docs/research). Every command declares *when* it may appear and
+// *how strictly* it must be named:
+//   when:     "empty" (only on an empty box) | "searching" | "always"
+//   matching: "default" (fuzzy) | "always" (must literally name itself)
+//   section:  the group heading, so one command cannot invent a second name
+// `keywords` are explicit aliases: acronyms like "vsc" only ever match here.
 const COMMANDS = [
   { kind: "cmd", cmd: "clip", icon: "📋", name: "Clipboard History",
-    keys: "clipboard history riwayat clipboard papan klip" },
+    keywords: ["clipboard", "history", "riwayat", "papan klip"],
+    rootSearch: { when: "searching", matching: "default", section: "Commands" } },
   { kind: "cmd", cmd: "emoji", icon: "🙂", name: "Emoji Picker",
-    keys: "emoji picker emotikon" },
+    keywords: ["emoji", "picker", "emotikon"],
+    rootSearch: { when: "searching", matching: "default", section: "Commands" } },
   { kind: "cmd", cmd: "files", icon: "📁", name: "Search Files",
-    keys: "search files file folder find dokument dokumen berkas" },
+    keywords: ["search files", "file", "folder", "find", "dokumen", "berkas"],
+    rootSearch: { when: "searching", matching: "named", section: "Commands" } },
   { kind: "cmd", cmd: "qr", icon: "▦", name: "QR Code Generator",
-    keys: "qr code qrcode qr generator barcode" },
+    keywords: ["qr", "qrcode", "qr code", "generator", "barcode"],
+    rootSearch: { when: "searching", matching: "default", section: "Commands" } },
   { kind: "cmd", cmd: "video", icon: "↓", name: "Video Download",
-    keys: "video download downloader omniget youtube audio" },
+    keywords: ["video", "download", "downloader", "omniget", "youtube", "audio"],
+    // Starts a network download, so it must be picked deliberately.
+    requiresManualSelection: true,
+    rootSearch: { when: "searching", matching: "default", section: "Commands" } },
   { kind: "cmd", cmd: "settings", icon: "⚙️", name: "Settings",
-    keys: "settings preferences setelan pengaturan" },
+    keywords: ["settings", "preferences", "setelan", "pengaturan"],
+    rootSearch: { when: "searching", matching: "default", section: "Commands" } },
 ];
 
 const MODE_LABEL = {
@@ -521,10 +542,14 @@ function render() {
       listEl.appendChild(groupEl);
     }
     const row = document.createElement("div");
-    row.className = "item" + (i === selected ? " selected" : "");
+    // A row that needs an explicit pick is marked, so the highlight on row 0
+    // never looks like Enter will run it.
+    const needsPick = needsManualPick(item);
+    row.className = "item" + (i === selected ? " selected" : "") + (needsPick ? " needs-pick" : "");
     row.setAttribute("role", "option");
     row.id = `result-${i}`;
     row.setAttribute("aria-selected", String(i === selected));
+    if (needsPick) row.setAttribute("aria-description", "Press Up or Down to select this before pressing Enter");
 
     row.append(iconElFor(item));
 
@@ -848,12 +873,36 @@ function settingsSection(title, rows) {
   return sec;
 }
 
-function settingsRow(label, desc, control) {
+// Focus key to restore after the next settings render. A per-row reset removes
+// its own button, so the row's control has to receive focus instead.
+let pendingSettingsFocus = "";
+
+/* "Reset to default" for a row whose value differs from the shipped one.
+   Keyboard users reach it by tabbing. */
+function resetControl(field, label) {
+  if (settingIsDefault(field)) return null;
+  const btn = el("button", "row-reset", "↺");
+  btn.type = "button";
+  btn.title = "Reset to default";
+  btn.setAttribute("aria-label", `Reset ${label} to default`);
+  btn.dataset.settingsFocus = `${label}-reset`;
+  btn.onclick = () => {
+    pendingSettingsFocus = `${label}-0`;
+    onSettingChange({ [field]: SETTINGS_DEFAULTS[field] }, true);
+  };
+  return btn;
+}
+
+function settingsRow(label, desc, control, field) {
   const row = el("div", "settings-row");
   const left = el("div", "label");
   left.appendChild(el("div", "t", label));
   if (desc) left.appendChild(el("div", "d", desc));
   const right = el("div", "control");
+  // Reset first, so the value and the control keep the same position whether
+  // or not the row has been changed.
+  const reset = field ? resetControl(field, label) : null;
+  if (reset) right.appendChild(reset);
   right.appendChild(control);
   const controls = [control, ...control.querySelectorAll("button, input, select")]
     .filter((node) => ["BUTTON", "INPUT", "SELECT"].includes(node.tagName));
@@ -871,7 +920,11 @@ function settingsRow(label, desc, control) {
   return row;
 }
 
+/* A switch states its own position in words, so the row can be read without
+   interpreting the knob. */
 function toggleControl(on, onChange) {
+  const wrap = el("div", "toggle-control");
+  const value = el("span", "row-value", on ? "On" : "Off");
   const btn = el("button", "switch" + (on ? " on" : ""));
   btn.type = "button";
   btn.setAttribute("role", "switch");
@@ -880,9 +933,11 @@ function toggleControl(on, onChange) {
     const next = !btn.classList.contains("on");
     btn.classList.toggle("on", next);
     btn.setAttribute("aria-checked", String(next));
+    value.textContent = next ? "On" : "Off";
     onChange(next);
   };
-  return btn;
+  wrap.append(value, btn);
+  return wrap;
 }
 
 function fontControl() {
@@ -1018,36 +1073,37 @@ function accentControl(onChange) {
   };
   hexInput.onblur = () => paint();
 
-  const reset = el("button", "link-btn", "Reset");
-  reset.type = "button";
-  reset.onclick = () => {
-    SETTINGS.accent = DEFAULT_ACCENT;
-    applyAccent(DEFAULT_ACCENT);
-    paint();
-    onChange(DEFAULT_ACCENT);
-  };
-
-  pickers.append(native, hexInput, reset);
+  // No "Reset" button here: the row-level ↺ (see resetControl) is the single,
+  // consistent reset affordance for every row that has a meaningful default.
+  pickers.append(native, hexInput);
   wrap.append(swatches, pickers);
   paint();
   return wrap;
 }
 
+/* Segmented choices also print the active label, so the row reads as a value
+   ("Expanded") and not only as a highlighted button. `options` entries are
+   [value, buttonLabel, valueLabel?]. */
 function segmentControl(options, value, onChange) {
-  const wrap = el("div", "segment");
-  for (const [val, label] of options) {
+  const wrap = el("div", "segment-wrap");
+  const seg = el("div", "segment");
+  const active = options.find(([val]) => val === value);
+  const shown = el("span", "row-value", active?.[2] || active?.[1] || "");
+  for (const [val, label, chip] of options) {
     const b = el("button", val === value ? "on" : "", label);
     b.type = "button";
     b.setAttribute("aria-pressed", String(val === value));
     b.onclick = () => {
-      [...wrap.children].forEach((c) => {
+      [...seg.children].forEach((c) => {
         c.classList.toggle("on", c === b);
         c.setAttribute("aria-pressed", String(c === b));
       });
+      shown.textContent = chip || label;
       onChange(val);
     };
-    wrap.appendChild(b);
+    seg.appendChild(b);
   }
+  wrap.append(shown, seg);
   return wrap;
 }
 
@@ -1198,19 +1254,76 @@ const SETTINGS_TABS = [
 let settingsTab = "general";
 let settingsFilter = "";
 
-/** Baris yang cocok dengan filter pencarian setelan. */
-function rowMatches(label, desc) {
+/* Shipped values for the fields that offer a per-row "Reset to default".
+   Identity and path fields (`hotkey`, `omniget_cli_path`) are deliberately
+   absent: resetting those would silently unbind the user's own shortcut or
+   point Video Download at the auto-detected CLI again.
+
+   Keep in sync with `Settings::default()` in crates/sun-core/src/settings.rs.
+   The Rust tests in that file read this table and fail if a value drifts, if a
+   resettable field is missing, or if an identity field appears. */
+const SETTINGS_DEFAULTS = {
+  open_at_login: false,
+  show_in_tray: true,
+  font: "sonora",
+  font_size: 14,
+  opacity: 100,
+  blur_ui: false,
+  window_mode: "expanded",
+  show_footer: true,
+  backspace_back: true,
+  vim_nav: false,
+  include_files: true,
+  file_results: 8,
+  theme: "system",
+  accent: "#f08c28", // Sunny orange — must stay equal to DEFAULT_ACCENT.
+  search_engine: "google",
+};
+
+/** True while a setting still holds the value Sunny ships with. */
+function settingIsDefault(field) {
+  const fallback = SETTINGS_DEFAULTS[field];
+  const current = SETTINGS[field] ?? fallback;
+  if (field === "accent") return normalizeHex(current) === normalizeHex(fallback);
+  return current === fallback;
+}
+
+/** Does one piece of text contain the current search? Always true when empty. */
+function matchesSettingsFilter(text) {
   if (!settingsFilter) return true;
-  const hay = `${label} ${desc || ""}`.toLowerCase();
-  return hay.includes(settingsFilter);
+  return String(text || "").toLowerCase().includes(settingsFilter);
 }
 
-/** Bungkus baris; kembalikan null bila tersaring keluar. */
-function maybeRow(label, desc, control) {
-  return rowMatches(label, desc) ? settingsRow(label, desc, control) : null;
+// One flag per section being built, so a nested section (a row can build its own
+// `settingsSection`) restores the outer section's state instead of clearing it.
+// A single boolean silently leaked: `settingsRow` renders inner sections, which
+// reset the flag to `false`, and every later row of the outer section then failed
+// its own filter — so a section-title match showed only its first rows.
+let settingsSectionMatched = false;
+
+/** True when a row survives the search, by its own text or by its section. */
+function rowMatches(label, desc) {
+  return settingsSectionMatched || matchesSettingsFilter(`${label} ${desc || ""}`);
 }
 
-function settingsSectionFiltered(title, rows) {
+/** Wrap a row; null when the search filters it out. */
+function maybeRow(label, desc, control, field) {
+  return rowMatches(label, desc) ? settingsRow(label, desc, control, field) : null;
+}
+
+/* Build one section. `buildRows` is deferred so the section can decide, before
+   any row exists, whether its own title already matched the search. The flag is
+   saved and restored rather than cleared, because building a row can build a
+   nested section of its own. */
+function settingsSectionFiltered(title, buildRows) {
+  const previous = settingsSectionMatched;
+  settingsSectionMatched = matchesSettingsFilter(title);
+  let rows;
+  try {
+    rows = buildRows();
+  } finally {
+    settingsSectionMatched = previous;
+  }
   const kept = rows.filter(Boolean);
   if (!kept.length) return null;
   return settingsSection(title, kept);
@@ -1416,21 +1529,25 @@ function renderSettings(force = false) {
 
   if (settingsTab === "general") {
     sections.push(
-      settingsSectionFiltered("General", [
+      settingsSectionFiltered("General", () => [
         maybeRow(
           "Open at Login",
           "Launch Sunny automatically when you sign in.",
           toggleControl(SETTINGS.open_at_login, (v) =>
             onSettingChange({ open_at_login: v }, true)
-          )
+          ),
+          "open_at_login"
         ),
         maybeRow(
           "Show in System Tray",
           "Keep the Sunny icon in the notification area.",
           toggleControl(SETTINGS.show_in_tray, (v) =>
             onSettingChange({ show_in_tray: v }, true)
-          )
+          ),
+          "show_in_tray"
         ),
+        // No reset for these two: the shortcut and the CLI path belong to the
+        // user, and a reset would silently unbind or re-point them.
         maybeRow(
           "Sunny Hotkey",
           "Record a shortcut, or choose Win + Space. Windows may also switch input languages; Sunny never blocks keys.",
@@ -1450,7 +1567,7 @@ function renderSettings(force = false) {
     );
   } else if (settingsTab === "launcher") {
     sections.push(
-      settingsSectionFiltered("Appearance", [
+      settingsSectionFiltered("Appearance", () => [
         maybeRow(
           "Theme",
           "Follow Windows, or force a light or dark launcher.",
@@ -1458,90 +1575,111 @@ function renderSettings(force = false) {
             [["system", "System"], ["light", "Light"], ["dark", "Dark"]],
             SETTINGS.theme,
             (v) => onSettingChange({ theme: v }, true)
-          )
+          ),
+          "theme"
         ),
         maybeRow(
           "Accent Color",
           "Highlight color for selections, switches, and active controls.",
-          accentControl((v) => onSettingChange({ accent: v }, true))
+          accentControl((v) => onSettingChange({ accent: v }, true)),
+          "accent"
         ),
         maybeRow(
           "Font",
           "Sonora ships Inter - the default Sunny typeface.",
-          fontControl()
+          fontControl(),
+          "font"
         ),
         maybeRow(
           "Font Size",
           "Base text size across the launcher.",
           stepperControl(SETTINGS.font_size, 12, 20, (v) =>
             onSettingChange({ font_size: v })
-          )
+          ),
+          "font_size"
         ),
       ]),
-      settingsSectionFiltered("Window", [
+      settingsSectionFiltered("Window", () => [
         maybeRow(
           "Opacity",
           "Background opacity. Text, icons, and controls stay fully opaque.",
           sliderControl(SETTINGS.opacity, 40, 100, (v) =>
             onSettingChange({ opacity: v })
-          )
+          ),
+          "opacity"
         ),
         maybeRow(
           "Blur UI",
           "Blur only the desktop snapshot, never text or icons. Visible below 100% opacity.",
           toggleControl(SETTINGS.blur_ui, (v) =>
             onSettingChange({ blur_ui: v }, true)
-          )
+          ),
+          "blur_ui"
         ),
         maybeRow(
           "Window Mode",
           "Raycast-style density of the launcher window.",
           segmentControl(
-            [["compact", "Raycast Compact"], ["expanded", "Raycast Expanded"]],
+            [
+              ["compact", "Raycast Compact", "Compact"],
+              ["expanded", "Raycast Expanded", "Expanded"],
+            ],
             SETTINGS.window_mode,
             (v) => onSettingChange({ window_mode: v }, true)
-          )
+          ),
+          "window_mode"
         ),
         maybeRow(
           "Show Footer Hints",
           "Display the keyboard hint bar at the bottom.",
           toggleControl(SETTINGS.show_footer, (v) =>
             onSettingChange({ show_footer: v }, true)
-          )
+          ),
+          "show_footer"
         ),
       ]),
-      settingsSectionFiltered("Search", [
+      settingsSectionFiltered("Search", () => [
         maybeRow(
           "Include Files in Root Search",
           "Show matching files directly in the main search, without opening Search Files.",
           toggleControl(SETTINGS.include_files, (v) =>
             onSettingChange({ include_files: v }, true)
-          )
+          ),
+          "include_files"
         ),
         maybeRow(
           "File Results",
           "How many file matches to show below Results in the main search.",
           stepperControl(SETTINGS.file_results, 0, 30, (v) =>
             onSettingChange({ file_results: v }, true), "files"
-          )
+          ),
+          "file_results"
         ),
         maybeRow(
           "Quick Web Search",
           "End a query with ? to search the web, for example “rust ownership?”.",
-          searchEngineControl()
+          searchEngineControl(),
+          "search_engine"
         ),
       ])
     );
   } else if (settingsTab === "shortcuts") {
     sections.push(
-      settingsSectionFiltered("Global", [
+      settingsSectionFiltered("Global", () => [
         maybeRow(
           "Show / Hide Sunny",
           "Win + Space activates after release and may also switch the Windows input language.",
           hotkeyControl()
         ),
       ]),
-      settingsSectionFiltered("In the Launcher", [
+      settingsSectionFiltered("In Settings", () => [
+        maybeRow("Filter Settings", "Type in the search box to narrow every tab. Section names match too, so “window” lists every Window row.", textValue("Type to filter")),
+        maybeRow("Clear the Filter", "In the search box, Esc clears the filter; Esc anywhere else closes the window. With no results, Enter clears it too.", textValue("Esc / Enter")),
+        maybeRow("Reset One Setting", "A row that differs from its default shows ↺. Tab to it, then press Enter.", textValue("Tab → Enter")),
+        maybeRow("Change a Control", "Tab to a switch, slider, or segmented button; Space or Enter operates it.", textValue("Tab / Space")),
+        maybeRow("Read a Value", "The current value is printed beside every switch and segmented control.", textValue("No click needed")),
+      ]),
+      settingsSectionFiltered("In the Launcher", () => [
         maybeRow("Open Settings", "Jump straight to this panel.", textValue("Ctrl + ,")),
         maybeRow("Emoji Picker", "Search for the command, then open it.", textValue("Type “emoji” → Enter")),
         maybeRow("QR Code Generator", "Search for QR Code Generator, enter text or a URL, then copy its image.", textValue("Type “qr code” → Enter")),
@@ -1555,12 +1693,12 @@ function renderSettings(force = false) {
         maybeRow("Search Files", "Search for the command by name.", textValue("Type “files”")),
         maybeRow("Close Launcher", "Hide the window.", textValue("Esc")),
       ]),
-      settingsSectionFiltered("Clipboard", [
+      settingsSectionFiltered("Clipboard", () => [
         maybeRow("Paste to Active Window", "Copies and pastes into the previous app.", textValue("Enter")),
         maybeRow("Copy Without Pasting", "Keeps the launcher open.", textValue("Ctrl + B")),
         maybeRow("Delete Entry", "Removes the selected history item.", textValue("Ctrl + D")),
       ]),
-      settingsSectionFiltered("Files", [
+      settingsSectionFiltered("Files", () => [
         maybeRow("Open File", "Uses the default application.", textValue("Enter")),
         maybeRow("Reveal in Explorer", "Selects the file in File Explorer, in Files mode or root search.", textValue("Ctrl + R")),
         maybeRow("Copy Full Path", "Copies the selected file's path without pasting it.", textValue("Ctrl + Shift + C")),
@@ -1568,20 +1706,20 @@ function renderSettings(force = false) {
     );
   } else if (settingsTab === "keyboard") {
     sections.push(
-      settingsSectionFiltered("Navigation", [
+      settingsSectionFiltered("Navigation", () => [
         maybeRow("Move Selection", "Up and down the result list.", textValue("↑ / ↓")),
         maybeRow("Vim Navigation", "Also use Ctrl+J / Ctrl+K to move.", toggleControl(SETTINGS.vim_nav, (v) =>
           onSettingChange({ vim_nav: v }, true)
-        )),
+        ), "vim_nav"),
         maybeRow("Activate Selection", "Open the highlighted result.", textValue("Enter")),
         maybeRow("Back to App Search", "Use Backspace in an empty command search to return to apps.", toggleControl(SETTINGS.backspace_back, (v) =>
           onSettingChange({ backspace_back: v }, true)
-        )),
+        ), "backspace_back"),
       ])
     );
   } else if (settingsTab === "advanced") {
     sections.push(
-      settingsSectionFiltered("Data", [
+      settingsSectionFiltered("Data", () => [
         maybeRow(
           "Settings File",
           "Stored as JSON in your local app data folder.",
@@ -1595,7 +1733,7 @@ function renderSettings(force = false) {
           linkButton("Reset…", resetSettings)
         ),
       ]),
-      settingsSectionFiltered("Index", [
+      settingsSectionFiltered("Index", () => [
         maybeRow(
           "File Index",
           "Built in the background at launch from your user folders.",
@@ -1612,9 +1750,11 @@ function renderSettings(force = false) {
       ])
     );
   } else if (settingsTab === "about") {
-    sections.push(aboutCard());
+    // The brand card is not a setting, so a search that matches nothing must
+    // not leave it standing over an otherwise empty panel.
+    if (!settingsFilter) sections.push(aboutCard());
     sections.push(
-      settingsSectionFiltered("Updates", [
+      settingsSectionFiltered("Updates", () => [
         maybeRow(
           "Version",
             installedVersion && installedVersion.release_tag.replace(/^v/, "") !== installedVersion.version
@@ -1630,7 +1770,7 @@ function renderSettings(force = false) {
       ])
     );
     sections.push(
-      settingsSectionFiltered("About", [
+      settingsSectionFiltered("About", () => [
         maybeRow("License", "Derivative work of Vicinae.", textValue("GPL-3.0")),
         maybeRow("Font", "Bundled from the Sonora project.", textValue("Inter (OFL)")),
         maybeRow("Emoji Data", "Generated from gemoji.", textValue("MIT")),
@@ -1641,12 +1781,49 @@ function renderSettings(force = false) {
 
   const kept = sections.filter(Boolean);
   if (!kept.length) {
-    settingsBodyEl.appendChild(
-      el("div", "settings-empty", "No settings match your search.")
-    );
+    settingsBodyEl.appendChild(settingsEmptyState());
   } else {
     settingsBodyEl.append(...kept);
   }
+  restorePendingSettingsFocus();
+}
+
+/* A per-row reset removes its own button; put focus back on the control that
+   stayed in the row so a keyboard user never loses their place. */
+function restorePendingSettingsFocus() {
+  if (!pendingSettingsFocus) return;
+  const key = pendingSettingsFocus;
+  pendingSettingsFocus = "";
+  const control = [...settingsBodyEl.querySelectorAll("button, input, select")]
+    .find((node) => node.dataset.settingsFocus === key);
+  control?.focus({ preventScroll: true });
+}
+
+/* Nothing matched. Name the search and the tab, then offer the way out, so the
+   user is never left at a dead end with no obvious next move. */
+function settingsEmptyState() {
+  const wrap = el("div", "settings-empty");
+  const tab = SETTINGS_TABS.find((entry) => entry.id === settingsTab);
+  wrap.appendChild(el("div", "settings-empty-title", `No settings match “${settingsFilter}”.`));
+  wrap.appendChild(
+    el(
+      "div",
+      "settings-empty-hint",
+      tab ? `Searched the ${tab.label} tab. Clear the filter or try another tab.` : "Clear the filter or try another tab."
+    )
+  );
+  const clear = linkButton("Clear search", clearSettingsFilter);
+  wrap.appendChild(clear);
+  return wrap;
+}
+
+/* Drop the filter, restore the full tab, and put the caret back in the search
+   box so the user can retype instead of hunting for the field. */
+function clearSettingsFilter() {
+  settingsFilter = "";
+  settingsSearchEl.value = "";
+  renderSettings();
+  settingsSearchEl.focus();
 }
 
 /* ── Auto-update (backend: tauri-plugin-updater) ───────── */
@@ -1961,12 +2138,48 @@ const fuzzy = (needle, hay) => {
 
 /* Commands are search-only. With root file search enabled, the dedicated
    "Search Files" command would duplicate the Files section, so it only appears
-   when the query actually names it. */
-function filesCommandVisible(query) {
-  if (!SETTINGS.include_files) return true;
+   when the query actually names it.
+
+   This used to be a hard-coded `cmd !== "files"` special case. It is now the
+   `rootSearch` contract every command carries (see the Raycast teardown), so a
+   new command never needs a new branch here. */
+function commandVisible(command, query) {
+  const rule = command.rootSearch || { when: "searching", matching: "default" };
   const text = String(query || "").toLowerCase().trim();
-  if (!text) return false;
-  return ["file", "files", "search files", "search file"].some((name) => text.includes(name));
+  if (rule.when === "empty" && text) return false;
+  if (rule.when === "searching" && !text) return false;
+  // "named" means the query must literally mention it, so a broad query does
+  // not duplicate a dedicated section (files, when root file search is on).
+  if (rule.matching === "named") {
+    if (command.cmd === "files" && !SETTINGS.include_files) return true;
+    if (!text) return false;
+    return commandKeywords(command).some((name) => text.includes(name));
+  }
+  return commandKeywords(command).some((keyword) => fuzzy(text, keyword));
+}
+
+function commandKeywords(command) {
+  const keywords = Array.isArray(command.keywords) ? command.keywords : [];
+  return [command.name.toLowerCase(), ...keywords.map((word) => word.toLowerCase())];
+}
+
+/* A row the user must acknowledge before Enter runs it. Explicit gestures —
+   clicking a row, the Actions menu — always count as acknowledgement. */
+function needsManualPick(item) {
+  return Boolean(item?.requiresManualSelection) && !selectionMoved;
+}
+
+/* Join row groups into one list where each group stays contiguous, so the
+   renderer's consecutive-change grouping emits every heading exactly once.
+   Groups are given in display order; empty groups disappear. */
+function mergeSections(groups) {
+  const merged = [];
+  for (const group of groups) {
+    const rows = Array.isArray(group) ? group : group.rows || [];
+    const label = Array.isArray(group) ? null : group.group;
+    for (const row of rows) merged.push(label ? { ...row, group: label } : row);
+  }
+  return merged;
 }
 
 /* ── Optional OmniGet download panel (no remote page or iframe) ── */
@@ -2167,18 +2380,26 @@ async function refresh() {
       ]);
       if (seq !== refreshSeq) return;
       const [calculation, lorem, apps] = results;
+      const resultRows = [];
       if (calculation.status === "fulfilled" && calculation.value != null) {
-        nextItems.push({ kind: "calc", expr: q, value: calculation.value, group: "Results" });
+        resultRows.push({ kind: "calc", expr: q, value: calculation.value });
       }
       if (lorem.status === "fulfilled" && lorem.value != null) {
-        nextItems.push({ kind: "lorem", expr: q, text: lorem.value, group: "Results" });
+        resultRows.push({ kind: "lorem", expr: q, text: lorem.value });
       }
+      // One admission rule for every command, driven by its own metadata.
+      // The section decides the heading; `mergeSections` keeps every section
+      // contiguous so the renderer never emits the same heading twice.
       const cmds = COMMANDS
-        .filter((c) => fuzzy(q, c.keys))
-        .filter((c) => c.cmd !== "files" || filesCommandVisible(q))
-        .map(({ keys, ...c }) => ({ ...c, group: "Results" }));
+        .filter((c) => commandVisible(c, q))
+        .map(({ keywords, rootSearch, ...c }) => ({ ...c, group: rootSearch.section }));
       const str = apps.status === "fulfilled" ? apps.value : [];
-      nextItems.push(...cmds, ...str.map((hit) => ({ ...hit.item, kind: "app", group: "Results" })));
+      // Results lead, commands follow as their own section: a named command
+      // (e.g. "Settings") must not split the app list into two "Results" blocks.
+      nextItems.push(...mergeSections([
+        { group: "Results", rows: [...resultRows, ...str.map((hit) => ({ ...hit.item, kind: "app" }))] },
+        cmds,
+      ]));
       for (const result of results) {
         if (result.status === "rejected") showLauncherError(result.reason);
       }
@@ -2186,6 +2407,7 @@ async function refresh() {
         // Publish apps atomically before slow files; backing items always match DOM.
         items = [...nextItems];
         selected = 0;
+        selectionMoved = false;
         render();
         const result = await fileRequest;
         if (seq !== refreshSeq) return;
@@ -2214,6 +2436,7 @@ async function refresh() {
   if (seq !== refreshSeq) return;
   items = nextItems;
   selected = 0;
+  selectionMoved = false;
   render();
 }
 
@@ -2288,6 +2511,7 @@ function resetLauncherSearch() {
   queryEl.placeholder = MODE_LABEL.apps;
   mode = "apps";
   selected = 0;
+  selectionMoved = false;
   items = [];
   render();
   refresh();
@@ -2360,6 +2584,7 @@ queryEl.addEventListener("input", () => {
   items = [];
   qrReadyText = "";
   selected = 0;
+  selectionMoved = false;
   render();
   const q = queryEl.value.trim();
   if (mode === "qr" && q) searchTimer = setTimeout(refresh, 80);
@@ -2399,7 +2624,18 @@ window.addEventListener("keydown", (e) => {
   if (settingsOpen) {
     if (e.key === "Escape") {
       e.preventDefault();
-      closeSettings();
+      // In the search box, Esc clears the filter before it closes the window,
+      // so one keystroke undoes a search without losing the panel.
+      if (settingsFilter && e.target === settingsSearchEl) clearSettingsFilter();
+      else closeSettings();
+      return;
+    }
+    // Enter on the "nothing matched" state clears the filter instead of
+    // leaving the user stuck at a dead end.
+    if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey && settingsFilter &&
+        settingsBodyEl.querySelector(".settings-empty")) {
+      e.preventDefault();
+      clearSettingsFilter();
     }
     return;
   }
@@ -2457,11 +2693,13 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown" || vimDown) {
     e.preventDefault();
     selected = Math.min(selected + 1, max);
+    selectionMoved = true;
     syncSelectionDom();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "ArrowUp" || vimUp) {
     e.preventDefault();
     selected = Math.max(selected - 1, 0);
+    selectionMoved = true;
     syncSelectionDom();
     listEl.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
   } else if (
@@ -2497,6 +2735,7 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (!e.repeat) {
       if (mode === "qr") copyQr();
+      else if (needsManualPick(items[selected])) showLauncherNote(`Press ↑ or ↓ to select “${items[selected].name}” first.`);
       else activate(selected);
     }
   } else if (e.key === "Escape") {

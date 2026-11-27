@@ -197,6 +197,46 @@ test("a lost setup response unlocks the button instead of hanging forever", asyn
   assert.equal(button.textContent, "Download OmniGet CLI");
 });
 
+test("a command that needs a deliberate pick cannot run from row 0 on Enter", async () => {
+  const f = await fixture();
+  await f.search("video download");
+  const index = f.run('items.findIndex((item) => item.cmd === "video")');
+  assert.ok(index >= 0, "Video Download is searchable");
+  assert.equal(f.run(`items[${index}].requiresManualSelection`), true);
+  // Row 0 is not the video command, so select it explicitly to test the guard.
+  f.run(`selected = ${index}; selectionMoved = false; render();`);
+  assert.match(f.nodes.list.querySelector(".selected").className, /needs-pick/);
+  await f.key("Enter");
+  assert.equal(f.calls.some((c) => c.command === "video_start"), false, "Enter did not start a download");
+  assert.equal(f.run("mode"), "apps", "Enter did not switch mode");
+  assert.match(f.nodes.launcherStatus.textContent, /select|↑|↓/i);
+  // After the user moves the selection, the same row opens.
+  await f.key("ArrowDown");
+  f.run(`selected = ${index}; selectionMoved = true; render();`);
+  await f.key("Enter");
+  assert.equal(f.run("mode"), "video", "a deliberate pick opens the command");
+});
+
+test("ordinary rows still run on Enter without moving the selection", async () => {
+  const f = await fixture({ responses: {
+    search_apps: [{ item: { name: "App", path: "app.lnk" } }],
+  } });
+  await f.search("app");
+  assert.equal(f.run("selected"), 0);
+  assert.equal(f.run("needsManualPick(items[0])"), false);
+  await f.key("Enter");
+  assert.ok(f.calls.some((c) => c.command === "run_app"), "the first app launches normally");
+});
+
+test("moving the highlight is reset by a new query, so the guard never sticks", async () => {
+  const f = await fixture();
+  await f.search("video");
+  await f.key("ArrowDown");
+  assert.equal(f.run("selectionMoved"), true);
+  await f.search("video");
+  assert.equal(f.run("selectionMoved"), false, "a fresh query clears the acknowledgement");
+});
+
 test("requirements check distinguishes a found CLI from missing video engines without downloading", async () => {
   const f = await fixture({ settingsWindow: true, responses: {
     video_check: { available: true, path: "C:\\OmniGet\\omniget-cli.exe", missing_tools: ["FFmpeg", "FFprobe"] },
@@ -345,13 +385,30 @@ test("root results and files have visible nonselectable groups in keyboard order
     search_files: { ready: true, total: 1, items: [{ item: { name: "Document", path: "doc.txt" } }] },
   } });
   await f.search("emoji");
-  assert.deepEqual(f.headings(), ["Results", "Files"]);
+  // "emoji" names a command, so the command gets its own section after Results
+  // instead of splitting the app list.
+  assert.deepEqual(f.headings(), ["Results", "Commands", "Files"]);
   assert.equal(f.nodes.list.querySelectorAll(".item").length, 4);
   assert.equal(f.run("items.length"), 4);
+  assert.equal(f.run('items.filter((item) => item.group === "Results").length'), 2);
+  assert.equal(f.run('items.filter((item) => item.group === "Commands").length'), 1);
   for (let i = 0; i < 3; i++) await f.key("ArrowDown");
   assert.equal(f.run("items[selected].kind"), "file");
   assert.equal(f.nodes.list.querySelector(".selected").getAttribute("aria-selected"), "true");
   assert.equal(f.nodes.query.getAttribute("aria-activedescendant"), "result-3");
+});
+
+test("each section heading appears at most once, even when commands and results interleave", async () => {
+  const f = await fixture({ responses: {
+    calc: "12", search_apps: [{ item: { name: "Settings", path: "settings.lnk" } }],
+  } });
+  await f.search("settings");
+  const headings = f.headings();
+  assert.deepEqual(headings, [...new Set(headings)], "no repeated heading");
+  assert.equal(headings.filter((h) => h === "Results").length, 1);
+  assert.equal(headings.filter((h) => h === "Commands").length, 1);
+  // The Settings command still ranks first because Results precedes Commands.
+  assert.equal(f.run("items[0].group"), "Results");
 });
 
 test("files-only results start at the top and empty headings are omitted", async () => {
@@ -1160,4 +1217,173 @@ test("Enter passes the captured marked query, and browser failures stay visible"
   assert.equal(f.calls.find((call) => call.command === "web_search").args.query, "Siapa itu jokowi?");
   assert.match(f.nodes.launcherStatus.textContent, /Cannot open default browser/);
   assert.equal(f.calls.some((call) => call.command === "hide_main_window"), false);
+});
+
+/* ── Settings UX: section search, per-row reset, empty state, inline values ── */
+
+// Labels of the settings rows currently rendered, in order.
+const settingLabels = (f) => f.nodes.settingsBody.querySelectorAll(".t").map((node) => node.textContent);
+const settingRow = (f, label) => f.nodes.settingsBody.querySelectorAll(".settings-row")
+  .find((row) => row.children[0].children[0].textContent === label);
+const rowValue = (f, label) => settingRow(f, label).children[1].querySelector(".row-value")?.textContent;
+const filterSettings = async (f, text) => {
+  f.nodes.settingsSearch.value = text;
+  for (const callback of f.nodes.settingsSearch.listeners.input || []) callback();
+  await f.settle();
+};
+
+test("settings search matches a section name and keeps every row of that section", async () => {
+  const f = await fixture({ settingsWindow: true });
+  f.run('settingsTab = "launcher"; renderSettings();');
+  await f.settle();
+  assert.ok(settingLabels(f).includes("Opacity"));
+
+  await filterSettings(f, "window");
+  const labels = settingLabels(f);
+  // "window" names the section, so its rows survive even though none of them
+  // contain the word in their own label or description.
+  for (const label of ["Opacity", "Blur UI", "Window Mode", "Show Footer Hints"]) {
+    assert.ok(labels.includes(label), `Window section keeps "${label}"`);
+  }
+  // Sections that neither match by name nor hold a matching row are gone.
+  assert.equal(labels.includes("Accent Color"), false);
+  assert.equal(labels.includes("Include Files in Root Search"), false);
+
+  // A row-level match still works without the section name. A description hit
+  // counts too ("Blur UI" explains that it is visible below 100% opacity).
+  await filterSettings(f, "opacity");
+  assert.deepEqual(settingLabels(f), ["Opacity", "Blur UI"]);
+
+  // Clearing brings everything back.
+  await filterSettings(f, "");
+  assert.ok(settingLabels(f).length > 4);
+});
+
+test("each changed row offers a reset that writes the shipped default immediately", async () => {
+  const f = await fixture({ settingsWindow: true, settings: { opacity: 60, theme: "light" }, responses: {
+    settings_update: ({ settings }) => settings,
+  } });
+  f.run('settingsTab = "launcher"; renderSettings();');
+  await f.settle();
+
+  // Only the two changed rows carry a reset, so a default row stays quiet.
+  const resets = f.nodes.settingsBody.querySelectorAll(".row-reset");
+  assert.equal(resets.length, 2);
+  assert.ok(settingRow(f, "Opacity").children[1].querySelector(".row-reset"));
+  assert.equal(settingRow(f, "Font Size").children[1].querySelector(".row-reset"), null);
+
+  const opacityReset = settingRow(f, "Opacity").children[1].querySelector(".row-reset");
+  assert.equal(opacityReset.getAttribute("aria-label"), "Reset Opacity to default");
+  f.calls.length = 0;
+  await opacityReset.click();
+  await f.settle();
+  const saved = f.calls.filter((call) => call.command === "settings_update").pop();
+  assert.equal(saved.args.settings.opacity, 100);
+  assert.equal(f.run("SETTINGS.opacity"), 100);
+  // The reset is gone now that the row matches the default again, and focus
+  // moved to the control that stayed in its place.
+  assert.equal(settingRow(f, "Opacity").children[1].querySelector(".row-reset"), null);
+  assert.equal(settingRow(f, "Opacity").children[1].querySelector("input").focused, true);
+
+  // The default table the buttons read from must match the launcher's accent.
+  assert.equal(f.run("SETTINGS_DEFAULTS.accent"), f.run("DEFAULT_ACCENT"));
+  assert.equal(f.run('JSON.stringify(Object.keys(SETTINGS_DEFAULTS).sort())'),
+    f.run('JSON.stringify(["accent","backspace_back","blur_ui","file_results","font","font_size",'
+      + '"include_files","open_at_login","opacity","search_engine","show_footer","show_in_tray",'
+      + '"theme","vim_nav","window_mode"].sort())'));
+});
+
+test("identity and path rows never offer a reset", async () => {
+  const f = await fixture({ settingsWindow: true, settings: {
+    hotkey: "Ctrl+F12", omniget_cli_path: "C:\\\\OmniGet\\\\omniget-cli.exe",
+  } });
+  await f.settle();
+  assert.ok(settingLabels(f).includes("Sunny Hotkey"));
+  assert.equal(f.nodes.settingsBody.querySelectorAll(".row-reset").length, 0);
+});
+
+test("every entry in the defaults table has a row that can reach it", async () => {
+  const f = await fixture({ settingsWindow: true });
+  await f.settle();
+  // Make every resettable field differ from its default, then count the reset
+  // buttons per tab. A typo in a row's field name, or a table entry with no
+  // row, makes the total disagree with the table.
+  f.run(`
+    for (const [key, value] of Object.entries(SETTINGS_DEFAULTS)) {
+      SETTINGS[key] = typeof value === "boolean" ? !value
+        : typeof value === "number" ? value + 1 : "zzz";
+    }
+  `);
+  const counts = {};
+  for (const tab of ["general", "launcher", "shortcuts", "keyboard", "advanced", "about"]) {
+    f.run(`settingsTab = ${JSON.stringify(tab)}; renderSettings(true);`);
+    counts[tab] = f.nodes.settingsBody.querySelectorAll(".row-reset").length;
+  }
+  assert.deepEqual(counts, {
+    general: 2, launcher: 11, shortcuts: 0, keyboard: 2, advanced: 0, about: 0,
+  });
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  assert.equal(total, f.run("Object.keys(SETTINGS_DEFAULTS).length"));
+});
+
+test("a settings search with no match names the query and clears with one action", async () => {
+  const f = await fixture({ settingsWindow: true });
+  await filterSettings(f, "zzzz");
+
+  const empty = f.nodes.settingsBody.querySelector(".settings-empty");
+  assert.ok(empty, "an empty state is shown");
+  assert.match(empty.children[0].textContent, /No settings match “zzzz”/);
+  const clear = empty.querySelectorAll("button").find((b) => b.textContent === "Clear search");
+  assert.ok(clear, "the empty state offers a way out");
+
+  await clear.click();
+  await f.settle();
+  assert.equal(f.run("settingsFilter"), "");
+  assert.equal(f.nodes.settingsSearch.value, "");
+  assert.equal(f.nodes.settingsBody.querySelector(".settings-empty"), null);
+  assert.ok(settingLabels(f).includes("Open at Login"));
+  assert.equal(f.nodes.settingsSearch.focused, true, "focus returns to the search field");
+});
+
+test("Enter on the empty state clears the filter instead of leaving a dead end", async () => {
+  const f = await fixture({ settingsWindow: true });
+  await filterSettings(f, "zzzz");
+  await f.key("Enter");
+  assert.equal(f.run("settingsFilter"), "");
+  assert.equal(f.nodes.settingsBody.querySelector(".settings-empty"), null);
+});
+
+test("Esc in the search box clears the filter before it closes the window", async () => {
+  const f = await fixture({ settingsWindow: true });
+  await filterSettings(f, "zzzz");
+  f.context.document.activeElement = f.nodes.settingsSearch;
+  await f.key("Escape", { target: f.nodes.settingsSearch });
+  assert.equal(f.run("settingsFilter"), "");
+  assert.equal(f.run("settingsOpen"), true, "the panel is still open");
+  assert.equal(f.calls.some((call) => call.command === "settings_close"), false);
+  // Outside the search box Esc still closes, as the footer promises.
+  await f.key("Escape");
+  assert.equal(f.run("settingsOpen"), false);
+});
+
+test("theme, window mode and toggles print their current value inline", async () => {
+  const f = await fixture({ settingsWindow: true, settings: {
+    theme: "light", window_mode: "compact", include_files: false, blur_ui: true, show_footer: false,
+  }, responses: { settings_update: ({ settings }) => settings } });
+  f.run('settingsTab = "launcher"; renderSettings();');
+  await f.settle();
+
+  assert.equal(rowValue(f, "Theme"), "Light");
+  assert.equal(rowValue(f, "Window Mode"), "Compact");
+  assert.equal(rowValue(f, "Include Files in Root Search"), "Off");
+  assert.equal(rowValue(f, "Blur UI"), "On");
+  assert.equal(rowValue(f, "Show Footer Hints"), "Off");
+  // Values follow the control, so the row never shows a stale state.
+  await settingRow(f, "Blur UI").children[1].querySelector(".switch").click();
+  await f.settle();
+  assert.equal(rowValue(f, "Blur UI"), "Off");
+  const dark = settingRow(f, "Theme").children[1].querySelectorAll("button").find((b) => b.textContent === "Dark");
+  await dark.click();
+  await f.settle();
+  assert.equal(rowValue(f, "Theme"), "Dark");
 });

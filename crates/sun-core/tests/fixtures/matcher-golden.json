@@ -1,0 +1,1269 @@
+{
+  "meta": {
+    "source": "raycast 2.14.0 main-window-BA9jIdSt.js",
+    "bundleSha256": "6a768000a27c60558ff36c208a645224342a428a2655db6ccf9babde5a0d1ab9",
+    "generatedAt": "2026-11-27T16:31:59.848Z"
+  },
+  "cases": [
+    {
+      "text": "settings",
+      "query": "settings",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Settings",
+      "query": "settings",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "visual studio code",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Cargo.lock",
+      "query": "cargo.lock",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "",
+      "query": "",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "İstanbul",
+      "query": "i̇stanbul",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "İstanbul",
+      "query": "istanbul",
+      "kind": "scored",
+      "score": 17,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "istanbul",
+      "query": "istanbul",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "p",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "ph",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "pho",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "phot",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "photo",
+      "kind": "scored",
+      "score": 12,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "v",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "vi",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "vis",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "visu",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "visua",
+      "kind": "scored",
+      "score": 12,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "studio",
+      "kind": "scored",
+      "score": 13,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "TextEditor",
+      "query": "editor",
+      "kind": "scored",
+      "score": 13,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "final",
+      "kind": "scored",
+      "score": 11,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "node_modules",
+      "query": "modules",
+      "kind": "scored",
+      "score": 14,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "Settings",
+      "query": "tti",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "ab-cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab.cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab/cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab(cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab)cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab[cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab]cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab\tcd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab\ncd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab_cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "ab cd",
+      "query": "cd",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "TextEditor",
+      "query": "te",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "visualStudioCode",
+      "query": "code",
+      "kind": "scored",
+      "score": 9,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "visualStudioCode",
+      "query": "vsc",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "TextEditor",
+      "query": "tor",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "myFileName",
+      "query": "fn",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "MP3Tag",
+      "query": "tag",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "app",
+      "query": "a-p-p",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 2,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "app",
+      "query": "app",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "texteditor",
+      "query": "text-editor",
+      "kind": "scored",
+      "score": 22,
+      "skipped": 1,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "text-editor",
+      "query": "text-editor",
+      "kind": "exact",
+      "score": null,
+      "skipped": null,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "texteditor",
+      "query": "text editor",
+      "kind": "scored",
+      "score": 22,
+      "skipped": 1,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abc",
+      "query": "a b",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 1,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abcde",
+      "query": "a e",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 1,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "ab",
+      "query": "abc",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "x",
+      "query": "xy",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "a",
+      "query": "aa",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "ba",
+      "query": "ab",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "abcdef",
+      "query": "fed",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "7-Zip",
+      "query": "z7",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "settings",
+      "query": "setx",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "node_modules",
+      "query": "mn",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "café",
+      "query": "cafe",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "a",
+      "query": "b",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "control panel display",
+      "query": "cpdx",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "IMG_2024_001.jpg",
+      "query": "jpg2",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "node_modules",
+      "query": "nmx",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "abcdefghij",
+      "query": "jih",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "abcde",
+      "query": "ace",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "abcdefghij",
+      "query": "ace",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "abxcde",
+      "query": "ace",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "abcdefghij",
+      "query": "adg",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "abcdefghij",
+      "query": "aj",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "visual studio code",
+      "query": "vsc",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "visual studio code",
+      "query": "vscode",
+      "kind": "scored",
+      "score": 14,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "control panel display",
+      "query": "cpd",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "task manager",
+      "query": "tm",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "snipping tool",
+      "query": "st",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "node_modules",
+      "query": "nm",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "visual studio code",
+      "query": "cd",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "mp3tag",
+      "query": "mpt",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "settings",
+      "query": "",
+      "kind": "scored",
+      "score": -9007199254740991,
+      "skipped": 0,
+      "low": true,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "",
+      "kind": "scored",
+      "score": -9007199254740991,
+      "skipped": 0,
+      "low": true,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "a",
+      "query": "",
+      "kind": "scored",
+      "score": -9007199254740991,
+      "skipped": 0,
+      "low": true,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "Microsoft Edge",
+      "query": "edge",
+      "kind": "scored",
+      "score": 9,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Microsoft Edge",
+      "query": "me",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Windows Terminal",
+      "query": "terminal",
+      "kind": "scored",
+      "score": 17,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Windows Terminal",
+      "query": "wt",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Task Manager",
+      "query": "task",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Task Manager",
+      "query": "tm",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Task Manager",
+      "query": "manager",
+      "kind": "scored",
+      "score": 15,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "File Explorer",
+      "query": "fe",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "File Explorer",
+      "query": "explorer",
+      "kind": "scored",
+      "score": 17,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Snipping Tool",
+      "query": "st",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Snipping Tool",
+      "query": "snip",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Calculator",
+      "query": "calc",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Control Panel",
+      "query": "cp",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Control Panel",
+      "query": "panel",
+      "kind": "scored",
+      "score": 11,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Settings",
+      "query": "set",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Photos",
+      "query": "pho",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "report",
+      "kind": "scored",
+      "score": 14,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "rf",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "pdf",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "IMG_2024_001.jpg",
+      "query": "img",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "IMG_2024_001.jpg",
+      "query": "jpg",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "IMG_2024_001.jpg",
+      "query": "2024",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "node_modules",
+      "query": "nm",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "node_modules",
+      "query": "node",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Cargo.lock",
+      "query": "cl",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Cargo.lock",
+      "query": "lock",
+      "kind": "scored",
+      "score": 9,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "7-Zip",
+      "query": "7z",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "7-Zip",
+      "query": "zip",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "MP3Tag",
+      "query": "mp3",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio 2022",
+      "query": "2022",
+      "kind": "scored",
+      "score": 9,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio 2022",
+      "query": "vs2022",
+      "kind": "scored",
+      "score": 14,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio 2022",
+      "query": "vs",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abcdef",
+      "query": "cd",
+      "kind": "scored",
+      "score": 4,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "isual",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "Settings",
+      "query": "ettings",
+      "kind": "scored",
+      "score": 14,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "eport",
+      "kind": "scored",
+      "score": 10,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": false
+    },
+    {
+      "text": "aXbXcX",
+      "query": "bcd",
+      "kind": "unmatched",
+      "score": null,
+      "skipped": null,
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    {
+      "text": "cdefgh",
+      "query": "cd",
+      "kind": "scored",
+      "score": 6,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abcDef",
+      "query": "def",
+      "kind": "scored",
+      "score": 7,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abCdef",
+      "query": "cdef",
+      "kind": "scored",
+      "score": 9,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abCdef",
+      "query": "cd",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "abCdef",
+      "query": "bc",
+      "kind": "scored",
+      "score": 5,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "x-y",
+      "query": "x y",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "report-final.pdf",
+      "query": "report final",
+      "kind": "scored",
+      "score": 26,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "Visual Studio Code",
+      "query": "visual-studio",
+      "kind": "scored",
+      "score": 28,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "a.b",
+      "query": "a-b",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "a-b",
+      "query": "a.b",
+      "kind": "scored",
+      "score": 8,
+      "skipped": 0,
+      "low": true,
+      "medium": true,
+      "high": true
+    },
+    {
+      "text": "node_modules",
+      "query": "node modules",
+      "kind": "scored",
+      "score": 23,
+      "skipped": 1,
+      "low": true,
+      "medium": true,
+      "high": true
+    }
+  ]
+}

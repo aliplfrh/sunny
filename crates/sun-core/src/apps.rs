@@ -23,6 +23,11 @@ pub struct AppEntry {
     /// Ikon aplikasi sebagai data URL PNG (None bila belum ada cache).
     /// Ekstraksi asli dilakukan `build_icon_cache` di background.
     pub icon: Option<String>,
+    /// Alias tambahan untuk pencarian ("vsc", "code"). Kosong secara default;
+    /// hanya diisi bila sebuah aplikasi perlu bisa ditemukan lewat singkatan
+    /// yang tidak muncul di namanya.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
 }
 
 fn scan_dir(dir: &Path, source: &'static str, out: &mut Vec<String>) {
@@ -79,6 +84,77 @@ fn detect_category(name: &str, path: &str) -> &'static str {
     }
 }
 
+/// Alias pencarian yang tidak muncul di nama aplikasi. Kosong bila nama resmi
+/// sudah cukup; daftar ini sengaja kecil agar tidak ada tebakan liar.
+fn app_keywords(name: &str) -> Vec<String> {
+    let lower = name.trim().to_lowercase();
+    let mut keywords: Vec<String> = Vec::new();
+    if lower.contains("visual studio code") {
+        keywords.extend(["vsc", "code"].map(str::to_string));
+    }
+    if lower == "visual studio" || lower.starts_with("visual studio 20") {
+        keywords.push("vs".into());
+    }
+    if lower.contains("microsoft edge") {
+        keywords.push("browser".into());
+    }
+    if lower.contains("windows terminal") {
+        keywords.extend(["terminal", "shell", "cmd"].map(str::to_string));
+    }
+    if lower.contains("file explorer") || lower == "explorer" {
+        keywords.extend(["files", "folder"].map(str::to_string));
+    }
+    if lower.contains("task manager") {
+        keywords.push("processes".into());
+    }
+    if lower.contains("snipping tool") {
+        keywords.extend(["screenshot", "snip"].map(str::to_string));
+    }
+    if lower.contains("calculator") {
+        keywords.push("calc".into());
+    }
+    if lower.contains("control panel") {
+        keywords.extend(["settings", "setelan", "pengaturan"].map(str::to_string));
+    }
+    keywords
+}
+
+/// Windows 11 hides several shell entry points from the Start Menu, so a folder
+/// scan alone cannot find them. These are launched through the `shell:` URI
+/// scheme, which needs no extra crate and no registry access. They are only
+/// added when the corresponding `.lnk` is genuinely absent, so a user who has a
+/// real shortcut never sees a duplicate.
+pub fn shell_apps(mut apps: Vec<AppEntry>) -> Vec<AppEntry> {
+    const SHELL_TARGETS: [(&str, &str, &[&str]); 2] = [
+        (
+            "Settings",
+            "shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel",
+            &["settings", "setelan", "pengaturan", "control panel", "preferences"],
+        ),
+        (
+            "Control Panel",
+            "shell:controlpanel",
+            &["control panel", "controlpanel", "settings"],
+        ),
+    ];
+    for (name, path, keywords) in SHELL_TARGETS {
+        let present = apps.iter().any(|app| app.name.eq_ignore_ascii_case(name));
+        if present {
+            continue;
+        }
+        apps.push(AppEntry {
+            name: name.into(),
+            path: path.into(),
+            source: "shell",
+            category: detect_category(name, path),
+            icon: None,
+            keywords: keywords.iter().map(|word| (*word).to_string()).collect(),
+        });
+    }
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps
+}
+
 /// Kumpulkan aplikasi lengkap dengan ikon dari cache (tanpa ekstraksi = cepat).
 pub fn scan_installed_apps() -> Vec<AppEntry> {
     let mut apps: Vec<AppEntry> = collect_shortcuts()
@@ -93,6 +169,7 @@ pub fn scan_installed_apps() -> Vec<AppEntry> {
                 .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
             AppEntry {
                 category: detect_category(&name, &path),
+                keywords: app_keywords(&name),
                 name,
                 path,
                 source: "start-menu",
@@ -130,6 +207,7 @@ pub fn merge_store_apps(mut apps: Vec<AppEntry>, store: Vec<StoreAppInput>) -> V
             .map(|png| format!("data:image/png;base64,{}", base64_encode(&png)));
         apps.push(AppEntry {
             category: detect_category(&app.name, &app.app_id),
+            keywords: app_keywords(&app.name),
             name: app.name,
             path: app.app_id,
             source: "store",
@@ -239,7 +317,75 @@ mod tests {
             source: "start-menu",
             category: "Application",
             icon: None,
+            keywords: Vec::new(),
         }
+    }
+
+    #[test]
+    fn shell_entries_appear_only_when_no_shortcut_exists() {
+        // Windows 11 hides Settings from the Start Menu, so the folder scan
+        // alone leaves `set` with nothing to find.
+        let empty = shell_apps(Vec::new());
+        let settings = empty
+            .iter()
+            .find(|app| app.name == "Settings")
+            .expect("Settings is offered");
+        assert!(
+            settings.path.starts_with("shell:"),
+            "launched via shell URI"
+        );
+        assert!(settings.keywords.iter().any(|word| word == "setelan"));
+
+        // A real shortcut must win, so nobody sees the same app twice.
+        let existing = shell_apps(vec![entry(
+            "Settings",
+            r"C:\Users\me\Start Menu\Settings.lnk",
+        )]);
+        assert_eq!(
+            existing.iter().filter(|app| app.name == "Settings").count(),
+            1,
+            "no duplicate Settings row"
+        );
+        assert_eq!(
+            existing
+                .iter()
+                .find(|app| app.name == "Settings")
+                .unwrap()
+                .path,
+            r"C:\Users\me\Start Menu\Settings.lnk"
+        );
+    }
+
+    #[test]
+    fn shell_entries_are_sorted_and_unique() {
+        let apps = shell_apps(vec![entry("Zebra", "z.lnk")]);
+        let names: Vec<&str> = apps.iter().map(|app| app.name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|name| name.to_lowercase());
+        assert_eq!(names, sorted);
+        let unique: std::collections::HashSet<&&str> = names.iter().collect();
+        assert_eq!(unique.len(), names.len());
+    }
+
+    #[test]
+    fn every_entry_in_the_alias_table_is_lowercase() {
+        for name in [
+            "Visual Studio Code",
+            "Visual Studio 2022",
+            "Microsoft Edge",
+            "Windows Terminal",
+            "File Explorer",
+            "Task Manager",
+            "Snipping Tool",
+            "Calculator",
+            "Control Panel",
+        ] {
+            for keyword in app_keywords(name) {
+                assert_eq!(keyword, keyword.to_lowercase(), "{name}: {keyword}");
+                assert!(!keyword.is_empty());
+            }
+        }
+        assert!(app_keywords("Notepad").is_empty(), "no invented aliases");
     }
 
     #[test]
