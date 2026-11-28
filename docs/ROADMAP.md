@@ -244,58 +244,34 @@ Sunny is a focused, lightweight launcher. The following upstream Vicinae feature
 Not committed work. Ordered by implementation cost; see the two blockers below before starting
 anything that needs the network.
 
+Four ideas that used to sit here shipped instead: **quick web search** and the **Lorem ipsum
+generator** in v1.0.6, the **QR code generator** in v1.0.9, and **video download via OmniGet** in
+v1.1.0. Their designs are recorded in the release sections below and in
+`docs/decisions/omniget-integration.md`.
+
 | # | Idea | Notes |
 |:--:|---|---|
-| 1 | **Quick web search** | Append `?` to open the query in a browser. `shell_open` already exists, and Sunny itself makes no request, so the network policy is untouched. |
-| 2 | **Lorem ipsum generator** | Pure `sun-core` module, no dependencies. |
-| 3 | **System commands** | Lock, shutdown, restart, sleep. Small surface, but destructive actions need an explicit confirmation step. |
-| 4 | **Windows & Control Panel settings search** | No enumerable API for `ms-settings:`; the page list must be curated by hand. Data work, not code work. |
-| 5 | **QR code generator** | Needs a QR crate; custom styling (colors, module shape, center logo) means rendering SVG directly. |
-| 6 | **Currency conversion and world clock** | World clock is pure timezone math. Currency needs an API, caching, and a parser for `1 usd to rupiah`. Free rate sources are typically daily, not real-time. |
-| 7 | **YouTube download via OmniGet** | Delegates to the external `omniget-cli` instead of bundling yt-dlp and FFMPEG. Estimated 5–8 days; see the dedicated section below. |
-
-### YouTube download via OmniGet (planned, unverified)
-
-Sunny would not download video itself. It would detect a video URL, offer resolution
-choices, and run the separately installed `omniget-cli` as a child process, reading its
-progress output. OmniGet is Tauri 2 + Rust under GPL-3.0, so the stack and licence match.
-
-Spike first: `omniget-cli` ships in every OmniGet release, but its progress output has not
-been checked for machine parsing here. Estimated total **5–8 days**, broken down as:
-
-| Step | Estimate |
-|---|:--:|
-| Spike: fetch `omniget-cli`, confirm `omniget info <url>` lists qualities and that progress lines are parseable | 0.5 day |
-| Detect installed CLI, pin a minimum version, and explain how to install it when missing | 0.5–1 day |
-| `sun-core` URL/format parsing with tests | 1 day |
-| Job subsystem: spawn, stream progress, cancel, clean up child processes | 1.5–2 days |
-| Launcher UI: quality picker, per-download progress, cancel, and error states | 1.5–2 days |
-| Optional integration instead of a hard dependency; documentation and disclosure | 1 day |
-
-Decisions needed before starting:
-
-- **Not bundled.** The installer must stay ~3.4 MB; ffmpeg and yt-dlp remain OmniGet's job.
-- **Configuration, not code.** Prefer calling the CLI; do not compile OmniGet's plugins, which are
-  pinned to their toolchain and would tie Sunny's releases to OmniGet's.
-- **Legal position.** Sunny would pass a URL to a tool the user installed rather than process the
-  video itself, but the repository is public and the feature still accepts YouTube URLs. State this
-  plainly in the README and make the feature opt-in.
-- **Network policy.** Invoking an external tool is not a request from Sunny, so `AGENTS.md` is not
-  technically violated, but its intent shifts. Add an explicit clause covering delegated tools.
+| 1 | **System commands** | Lock, shutdown, restart, sleep. Small surface, but destructive actions need an explicit confirmation step. |
+| 2 | **Windows & Control Panel settings search** | No enumerable API for `ms-settings:`; the page list must be curated by hand. Data work, not code work. |
+| 3 | **Currency conversion and world clock** | World clock is pure timezone math. Currency needs an API, caching, and a parser for `1 usd to rupiah`. Free rate sources are typically daily, not real-time. |
 
 ### Blockers for network-backed ideas
 
 1. **Network policy.** `AGENTS.md` forbids network calls other than the update check. Currency
    conversion needs a documented allowlist, CSP restrictions (currently `csp: null`), timeouts,
    offline caching, and a decision about whether user queries may leave the machine — that is a
-   privacy change for a project that advertises no telemetry.
-2. **Long-running job subsystem.** Only the updater reports progress today. Future background
-   work needs progress, cancellation, and cleanup instead of ad-hoc threads.
+   privacy change for a project that advertises no telemetry. The approved exception for
+   user-initiated downloads through the external OmniGet CLI does not extend to Sunny fetching
+   data itself.
+2. **Long-running job subsystem.** The updater and the OmniGet video download both report progress,
+   but each grew its own ad-hoc path. Future background work needs one shared progress,
+   cancellation and cleanup mechanism instead of a third variant.
 
 ### Refactor queues ahead of the backlog
 
-- `refresh()` in `main.js` is a five-branch `if/else` chain. Each answer type added inline makes it
-  harder to test; introduce an answer-provider abstraction before adding a third provider.
+- `refresh()` in `main.js` is an eight-branch `if/else` chain (video, QR, emoji, clipboard, files,
+  home, web, root search). Each answer type added inline makes it harder to test; introduce an
+  answer-provider abstraction before adding a fourth provider.
 - Releases are built and signed locally because GitHub Actions is blocked on an account billing
   issue. Restore CI before the release cadence grows.
 
@@ -304,8 +280,8 @@ Decisions needed before starting:
 - **Internet speed test** — rejected. Needs external servers, careful throughput measurement, and a
   steady-state UI that does not fit a query-driven launcher.
 - **Bundling YouTube download with FFMPEG in Sunny** — rejected. It would grow the installer from
-  ~3.4 MB to roughly 80–120 MB and tie Sunny to a constantly breaking extractor. Delegating to an
-  external tool (see the OmniGet entry above) is the alternative under consideration.
+  ~3.4 MB to roughly 80–120 MB and tie Sunny to a constantly breaking extractor. v1.1.0 delegates to
+  an external tool instead; see `docs/decisions/omniget-integration.md`.
 
 ## Release v1.0.6 — Quick web search and Lorem ipsum
 
