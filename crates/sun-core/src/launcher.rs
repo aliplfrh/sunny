@@ -208,7 +208,7 @@ fn save_atomic(path: &Path, data: &HistoryData) -> Result<(), String> {
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, path)
+        crate::fsutil::replace(&temporary, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);

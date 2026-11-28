@@ -9,6 +9,7 @@ pub mod calc;
 pub mod clipboard;
 pub mod emoji;
 pub mod files;
+pub(crate) mod fsutil;
 pub mod launcher;
 pub mod lorem;
 pub mod match_rank;

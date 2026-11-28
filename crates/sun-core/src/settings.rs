@@ -146,8 +146,8 @@ impl Settings {
         let result = write(&mut file, &bytes).and_then(|()| file.sync_all());
         // Close before rename or cleanup, including after partial writes on Windows.
         drop(file);
-        // Rust's rename atomically replaces an existing file on Windows too.
-        let result = result.and_then(|()| fs::rename(&temporary, path));
+        // Retries transient Windows lock errors instead of discarding the save.
+        let result = result.and_then(|()| crate::fsutil::replace(&temporary, path));
         if let Err(error) = result {
             let _ = fs::remove_file(&temporary);
             return Err(format!(
@@ -426,6 +426,39 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "previous settings");
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_destination_unlocked_during_the_retry_window_is_still_saved() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::time::Duration;
+
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        fs::write(&path, "previous settings").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .expect("lock only the isolated destination");
+
+        // Release the lock after the first rename attempt has failed, so the save
+        // has to survive a transient error instead of reporting failure.
+        let unlocked = std::thread::scope(|scope| {
+            let handle = scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(12));
+                drop(lock);
+            });
+            let result = Settings::default().save_to(&path);
+            handle.join().expect("release the lock without panicking");
+            result
+        });
+        unlocked.expect("save once the destination is unlocked");
+
+        let restored: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(restored.opacity, Settings::default().opacity);
         assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
     }
 
