@@ -174,7 +174,7 @@ impl ClipboardStore {
         if let Ok(file) = fs::File::open(&temp) {
             let _ = file.sync_all();
         }
-        fs::rename(&temp, path).map_err(|e| {
+        crate::fsutil::replace(&temp, path).map_err(|e| {
             let _ = fs::remove_file(&temp);
             format!("Could not replace clipboard history: {e}")
         })

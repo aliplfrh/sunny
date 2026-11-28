@@ -105,7 +105,7 @@ fn install_verified(bytes: &[u8], target: &Path, expected: &str) -> Result<(), S
         .map_err(|_| "Could not stage the OmniGet CLI.")?;
     let result = file.write_all(&data).and_then(|()| file.sync_all());
     drop(file);
-    let result = result.and_then(|()| fs::rename(&stage, target));
+    let result = result.and_then(|()| crate::fsutil::replace(&stage, target));
     if result.is_err() {
         let _ = fs::remove_file(&stage);
         return Err("Could not install OmniGet. Cancel active downloads and try again; the previous CLI was kept.".into());
